@@ -24,17 +24,98 @@ model Company {
 }
 
 model User {
-  id        String    @id @default(uuid())
-  name      String
-  email     String    @unique
-  password  String
-  role      UserRole
-  active    Boolean   @default(true)
+  id       String   @id @default(uuid())
+  name     String
+  email    String   @unique
+  password String
+  role     UserRole
+  active   Boolean  @default(true)
 
-  companyId String?        
-  company   Company?       @relation(fields: [companyId], references: [id])
+  companyId String?
+  company   Company? @relation(fields: [companyId], references: [id])
 
-  createdAt DateTime  @default(now())
+  createdAt DateTime @default(now())
 }
 
+model Standard {
+  id       String  @id @default(uuid())
+  name     String
+  code     String  @unique
+  isGlobal Boolean @default(true)
 
+  categories TestCategory[]
+
+  createdAt DateTime @default(now())
+}
+
+model TestCategory {
+  id   String @id @default(uuid())
+  name String
+
+  standardId String
+  standard   Standard @relation(fields: [standardId], references: [id])
+
+  companyId String?
+
+  tests Test[]
+
+  createdAt DateTime @default(now())
+}
+
+model Test {
+  id          String  @id @default(uuid())
+  name        String
+  description String?
+
+  categoryId String
+  category   TestCategory @relation(fields: [categoryId], references: [id])
+
+  companyId String?
+
+  parameters TestParameter[]
+
+  createdAt DateTime @default(now())
+}
+
+model TestParameter {
+  id   String  @id @default(uuid())
+  name String
+  unit String?
+
+  testId String
+  test   Test   @relation(fields: [testId], references: [id])
+
+  companyId String?
+
+  defaultCriteria AcceptanceCriteria?
+
+  overrides CompanyParameterOverride[]
+
+  createdAt DateTime @default(now())
+}
+
+model AcceptanceCriteria {
+  id String @id @default(uuid())
+
+  parameterId String        @unique
+  parameter   TestParameter @relation(fields: [parameterId], references: [id])
+
+  minValue   Float?
+  maxValue   Float?
+  exactValue String?
+}
+
+model CompanyParameterOverride {
+  id String @id @default(uuid())
+
+  companyId   String
+  parameterId String
+
+  parameter TestParameter @relation(fields: [parameterId], references: [id])
+
+  minValue   Float?
+  maxValue   Float?
+  exactValue String?
+
+  isDisabled Boolean @default(false)
+}
