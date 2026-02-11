@@ -4,7 +4,7 @@ import { CreateStandardDto } from './dto/create-standard.dto';
 
 @Injectable()
 export class StandardService {
-  constructor(private prisma: PrismaService) {}
+  constructor(private prisma: PrismaService) { }
 
   create(dto: CreateStandardDto) {
     return this.prisma.standard.create({
@@ -18,5 +18,22 @@ export class StandardService {
         categories: true,
       },
     });
+
+  }
+
+
+  update(id: string, dto: CreateStandardDto) {
+    return this.prisma.standard.update({
+      where: { id },
+      data: dto,
+    });
+  }
+
+  remove(id: string) {
+    return this.prisma.standard.delete({
+      where: { id },
+    });
   }
 }
+
+

@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Post } from '@nestjs/common';
+import { Body, Controller, Get, Post,Put, Delete,Param } from '@nestjs/common';
 import { StandardService } from './standard.service';
 import { CreateStandardDto } from './dto/create-standard.dto';
 import { Roles } from '../auth/roles.decorator';
@@ -17,5 +17,17 @@ export class StandardController {
   @Get()
   findAll() {
     return this.service.findAll();
+  }
+  
+  @Roles(UserRole.PLATFORM_ADMIN)
+  @Put(':id')
+  update(@Param('id') id: string, @Body() dto: CreateStandardDto) {
+    return this.service.update(id, dto);
+  }
+
+  @Roles(UserRole.PLATFORM_ADMIN)
+  @Delete(':id')
+  remove(@Param('id') id: string) {
+    return this.service.remove(id);
   }
 }

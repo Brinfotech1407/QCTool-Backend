@@ -4,7 +4,7 @@ import { CreateParameterDto } from './dto/create-parameter.dto';
 
 @Injectable()
 export class ParameterService {
-  constructor(private prisma: PrismaService) {}
+  constructor(private prisma: PrismaService) { }
 
   async create(dto: CreateParameterDto) {
     const parameter = await this.prisma.testParameter.create({
@@ -39,6 +39,19 @@ export class ParameterService {
       include: {
         defaultCriteria: true,
       },
+    });
+  }
+
+  update(id: string, dto: CreateParameterDto) {
+    return this.prisma.testParameter.update({
+      where: { id },
+      data: dto,
+    });
+  }
+
+  remove(id: string) {
+    return this.prisma.testParameter.delete({
+      where: { id },
     });
   }
 }

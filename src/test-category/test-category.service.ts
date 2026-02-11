@@ -4,7 +4,7 @@ import { CreateCategoryDto } from './dto/create-category.dto';
 
 @Injectable()
 export class TestCategoryService {
-  constructor(private prisma: PrismaService) {}
+  constructor(private prisma: PrismaService) { }
 
   create(dto: CreateCategoryDto) {
     return this.prisma.testCategory.create({
@@ -18,6 +18,19 @@ export class TestCategoryService {
       include: {
         tests: true,
       },
+    });
+  }
+
+  update(id: string, dto: CreateCategoryDto) {
+    return this.prisma.testCategory.update({
+      where: { id },
+      data: dto,
+    });
+  }
+
+  remove(id: string) {
+    return this.prisma.testCategory.delete({
+      where: { id },
     });
   }
 }

@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Post, Query } from '@nestjs/common';
+import { Body, Controller, Get, Post, Query, Put, Delete, Param } from '@nestjs/common';
 import { TestCategoryService } from './test-category.service';
 import { CreateCategoryDto } from './dto/create-category.dto';
 import { Roles } from '../auth/roles.decorator';
@@ -6,7 +6,7 @@ import { UserRole } from '@prisma/client';
 
 @Controller('categories')
 export class TestCategoryController {
-  constructor(private service: TestCategoryService) {}
+  constructor(private service: TestCategoryService) { }
 
   @Roles(UserRole.PLATFORM_ADMIN)
   @Post()
@@ -18,4 +18,21 @@ export class TestCategoryController {
   findByStandard(@Query('standardId') standardId: string) {
     return this.service.findByStandard(standardId);
   }
+
+  @Roles(UserRole.PLATFORM_ADMIN)
+  @Put(':id')
+  update(
+    @Param('id') id: string,
+    @Body() dto: CreateCategoryDto,
+  ) {
+    return this.service.update(id, dto);
+  }
+
+  @Roles(UserRole.PLATFORM_ADMIN)
+  @Delete(':id')
+  remove(@Param('id') id: string) {
+    return this.service.remove(id);
+  }
+
+
 }

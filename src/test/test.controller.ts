@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Post, Query } from '@nestjs/common';
+import { Body, Controller, Get, Post, Query, Put, Delete, Param } from '@nestjs/common';
 import { TestService } from './test.service';
 import { CreateTestDto } from './dto/create-test.dto';
 import { Roles } from '../auth/roles.decorator';
@@ -6,7 +6,7 @@ import { UserRole } from '@prisma/client';
 
 @Controller('tests')
 export class TestController {
-  constructor(private service: TestService) {}
+  constructor(private service: TestService) { }
 
   @Roles(UserRole.PLATFORM_ADMIN)
   @Post()
@@ -17,5 +17,15 @@ export class TestController {
   @Get()
   findByCategory(@Query('categoryId') categoryId: string) {
     return this.service.findByCategory(categoryId);
+  }
+
+  @Put(':id')
+  update(@Param('id') id: string, @Body() dto: CreateTestDto) {
+    return this.service.update(id, dto);
+  }
+
+  @Delete(':id')
+  remove(@Param('id') id: string) {
+    return this.service.remove(id);
   }
 }

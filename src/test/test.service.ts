@@ -4,7 +4,7 @@ import { CreateTestDto } from './dto/create-test.dto';
 
 @Injectable()
 export class TestService {
-  constructor(private prisma: PrismaService) {}
+  constructor(private prisma: PrismaService) { }
 
   create(dto: CreateTestDto) {
     return this.prisma.test.create({
@@ -18,6 +18,19 @@ export class TestService {
       include: {
         parameters: true,
       },
+    });
+  }
+
+  update(id: string, dto: CreateTestDto) {
+    return this.prisma.test.update({
+      where: { id },
+      data: dto,
+    });
+  }
+
+  remove(id: string) {
+    return this.prisma.test.delete({
+      where: { id },
     });
   }
 }
