@@ -16,7 +16,11 @@ export class TestService {
     return this.prisma.test.findMany({
       where: { categoryId },
       include: {
-        parameters: true,
+        parameters: {
+          include: {
+            defaultCriteria: true,
+          },
+        },
       },
     });
   }
