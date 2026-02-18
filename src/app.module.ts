@@ -10,11 +10,13 @@ import { StandardModule } from './standard/standard.module';
 import { TestCategoryModule } from './test-category/test-category.module';
 import { TestModule } from './test/test.module';
 import { ParameterModule } from './parameter/parameter.module';
+import { RuleEngineModule } from './rule-engine/rule-engine.module';
+import { RuleDefinitionModule } from './rule-definition/rule-definition';
 
 
 
 @Module({
-  imports: [ConfigModule.forRoot({ isGlobal: true }),PrismaModule, CompanyModule, UserModule, AuthModule, StandardModule, TestCategoryModule, TestModule, ParameterModule],
+  imports: [ConfigModule.forRoot({ isGlobal: true }),PrismaModule, CompanyModule, UserModule, AuthModule, StandardModule, TestCategoryModule, TestModule, ParameterModule, RuleEngineModule,RuleDefinitionModule,],
   controllers: [AppController],
   providers: [AppService],
 })

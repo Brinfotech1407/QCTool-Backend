@@ -19,6 +19,7 @@ export class TestService {
         parameters: {
           include: {
             defaultCriteria: true,
+             ruleDefinition: true,  
           },
         },
       },

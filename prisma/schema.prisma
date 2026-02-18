@@ -5,6 +5,15 @@ enum UserRole {
   AUDITOR
 }
 
+enum RuleType {
+  FIXED_RANGE
+  BAND_SINGLE
+  BAND_MATRIX
+  ASYMMETRIC_BAND
+  RATIO_PERCENT
+  FORMULA
+}
+
 datasource db {
   provider = "postgresql"
   url      = env("DATABASE_URL")
@@ -89,9 +98,21 @@ model TestParameter {
 
   defaultCriteria AcceptanceCriteria?
 
+  ruleDefinition RuleDefinition?  // <-- NEW
+
   overrides CompanyParameterOverride[]
 
   createdAt DateTime @default(now())
+}
+
+model RuleDefinition {
+  id           String   @id @default(uuid())
+  parameterId  String   @unique
+  ruleType     RuleType
+  ruleConfig   Json
+  createdAt    DateTime @default(now())
+
+  parameter    TestParameter @relation(fields: [parameterId], references: [id], onDelete: Cascade)
 }
 
 model AcceptanceCriteria {

@@ -38,6 +38,7 @@ export class ParameterService {
       where: { testId },
       include: {
         defaultCriteria: true,
+        ruleDefinition: true
       },
     });
   }
