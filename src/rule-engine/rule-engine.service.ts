@@ -130,7 +130,7 @@ export class RuleEngineService {
     const nominal = batchContext.nominalValue;
 
     const band = config.bands.find(
-      (b: any) => nominal > b.min && nominal <= b.max
+      (b) => nominal >= b.min && nominal <= b.max
     );
 
     if (!band) throw new Error('No matching band');

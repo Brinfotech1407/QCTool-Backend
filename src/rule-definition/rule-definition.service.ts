@@ -1,10 +1,11 @@
 import { Injectable } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { RuleType } from '@prisma/client';
+import { RuleEngineService } from '../rule-engine/rule-engine.service';
 
 @Injectable()
 export class RuleDefinitionService {
-  constructor(private prisma: PrismaService) { }
+  constructor(private prisma: PrismaService, private ruleEngine: RuleEngineService) { }
 
   createOrUpdate(data: {
     parameterId: string;
@@ -39,4 +40,30 @@ export class RuleDefinitionService {
       where: { id },
     });
   }
+
+  async validateRule(body: any) {
+
+    const { parameterId, batchContext, measuredValue } = body;
+
+    const parameter = await this.prisma.testParameter.findUnique({
+      where: { id: parameterId },
+      include: {
+        ruleDefinition: true,
+        defaultCriteria: true,
+      },
+    });
+
+    if (!parameter) {
+      throw new Error('Parameter not found');
+    }
+
+    const result = this.ruleEngine.evaluate(
+      parameter,
+      batchContext,
+      measuredValue
+    );
+
+    return result;
+  }
+
 }

@@ -24,4 +24,9 @@ export class RuleDefinitionController {
     remove(@Param('id') id: string) {
         return this.service.delete(id);
     }
+
+    @Post('validate')
+    validate(@Body() body: any) {
+        return this.service.validateRule(body);
+    }
 }
