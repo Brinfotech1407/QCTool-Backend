@@ -12,6 +12,7 @@ enum RuleType {
   ASYMMETRIC_BAND
   RATIO_PERCENT
   FORMULA
+  CHEMICAL_COMPOSITION
 }
 
 datasource db {

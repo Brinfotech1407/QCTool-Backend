@@ -28,6 +28,8 @@ export class RuleEngineService {
 
         case RuleType.FIXED_RANGE:
           return this.evaluateFixedRange(ruleConfig, measuredValue);
+        case RuleType.CHEMICAL_COMPOSITION:
+          return this.evaluateChemicalComposition(ruleConfig, batchContext);
         default:
           throw new Error('Unsupported rule type');
       }
@@ -154,5 +156,52 @@ export class RuleEngineService {
       (max === null || measuredValue <= max);
 
     return { pass, min, max };
+  }
+
+  private evaluateChemicalComposition(config: any, batchContext: any) {
+    const { grade, cuAg, p, o } = batchContext;
+
+    const gradeRule = config.grades[grade];
+    if (!gradeRule) {
+      throw new Error('Invalid grade selected');
+    }
+
+    let pass = true;
+    const details: any = {};
+
+    if (gradeRule.cuAg) {
+      const min = gradeRule.cuAg.min ?? null;
+      const max = gradeRule.cuAg.max ?? null;
+
+      const result =
+        (min === null || cuAg >= min) &&
+        (max === null || cuAg <= max);
+
+      details.cuAg = result;
+      if (!result) pass = false;
+    }
+
+    if (gradeRule.p) {
+      const min = gradeRule.p.min ?? null;
+      const max = gradeRule.p.max ?? null;
+
+      const result =
+        (min === null || p >= min) &&
+        (max === null || p <= max);
+
+      details.p = result;
+      if (!result) pass = false;
+    }
+
+    if (gradeRule.o) {
+      const max = gradeRule.o.max ?? null;
+
+      const result = max === null || o <= max;
+
+      details.o = result;
+      if (!result) pass = false;
+    }
+
+    return { pass, details };
   }
 }
