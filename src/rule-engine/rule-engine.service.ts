@@ -26,6 +26,8 @@ export class RuleEngineService {
         case RuleType.ASYMMETRIC_BAND:
           return this.evaluateAsymmetricBand(ruleConfig, batchContext, measuredValue);
 
+        case RuleType.FIXED_RANGE:
+          return this.evaluateFixedRange(ruleConfig, measuredValue);
         default:
           throw new Error('Unsupported rule type');
       }
@@ -139,6 +141,17 @@ export class RuleEngineService {
     const max = nominal + (band.plus || 0);
 
     const pass = measuredValue >= min && measuredValue <= max;
+
+    return { pass, min, max };
+  }
+
+  private evaluateFixedRange(config: any, measuredValue: number) {
+    const min = config.minValue ?? null;
+    const max = config.maxValue ?? null;
+
+    const pass =
+      (min === null || measuredValue >= min) &&
+      (max === null || measuredValue <= max);
 
     return { pass, min, max };
   }
