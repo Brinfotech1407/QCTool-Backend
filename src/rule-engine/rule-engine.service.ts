@@ -30,6 +30,8 @@ export class RuleEngineService {
           return this.evaluateFixedRange(ruleConfig, measuredValue);
         case RuleType.CHEMICAL_COMPOSITION:
           return this.evaluateChemicalComposition(ruleConfig, batchContext);
+        case RuleType.MECHANICAL_PROPERTIES:
+          return this.evaluateMechanical(ruleConfig, batchContext);
         default:
           throw new Error('Unsupported rule type');
       }
@@ -161,44 +163,108 @@ export class RuleEngineService {
   private evaluateChemicalComposition(config: any, batchContext: any) {
     const { grade, cuAg, p, o } = batchContext;
 
-    const gradeRule = config.grades[grade];
+    console.log("Incoming grade:", grade);
+    console.log("Available grades:", config.grades);
+
+    const gradeRule = config.grades.find(
+      (g: any) =>
+        g.key?.trim().toLowerCase() ===
+        grade?.trim().toLowerCase()
+    );
+
     if (!gradeRule) {
-      throw new Error('Invalid grade selected');
+      return {
+        pass: false,
+        error: 'Selected grade not found in configuration',
+      };
     }
 
     let pass = true;
     const details: any = {};
 
-    if (gradeRule.cuAg) {
-      const min = gradeRule.cuAg.min ?? null;
-      const max = gradeRule.cuAg.max ?? null;
-
-      const result =
-        (min === null || cuAg >= min) &&
-        (max === null || cuAg <= max);
-
+    // Cu + Ag (Min only)
+    if (gradeRule.cuAgMin !== null && gradeRule.cuAgMin !== undefined) {
+      const result = cuAg >= gradeRule.cuAgMin;
       details.cuAg = result;
       if (!result) pass = false;
     }
 
-    if (gradeRule.p) {
-      const min = gradeRule.p.min ?? null;
-      const max = gradeRule.p.max ?? null;
-
+    // P Range
+    if (
+      gradeRule.pMin !== null &&
+      gradeRule.pMax !== null
+    ) {
       const result =
-        (min === null || p >= min) &&
-        (max === null || p <= max);
-
+        p >= gradeRule.pMin &&
+        p <= gradeRule.pMax;
       details.p = result;
       if (!result) pass = false;
     }
 
-    if (gradeRule.o) {
-      const max = gradeRule.o.max ?? null;
-
-      const result = max === null || o <= max;
-
+    // O Max
+    if (
+      gradeRule.oMax !== null &&
+      gradeRule.oMax !== undefined
+    ) {
+      const result = o <= gradeRule.oMax;
       details.o = result;
+      if (!result) pass = false;
+    }
+
+    return { pass, details };
+  }
+
+  private evaluateMechanical(config: any, batchContext: any) {
+
+    const {
+      condition,
+      tensile,
+      elongation,
+      flattening,
+      drift
+    } = batchContext;
+
+    const rule = config.conditions.find(
+      (c: any) =>
+        c.key?.trim().toLowerCase() ===
+        condition?.trim().toLowerCase()
+    );
+
+    if (!rule) {
+      return { pass: false, error: 'Invalid condition selected' };
+    }
+
+    let pass = true;
+    const details: any = {};
+
+    // Tensile
+    if (rule.tensileMin !== null) {
+      const result =
+        tensile >= rule.tensileMin &&
+        (rule.tensileMax === null || tensile <= rule.tensileMax);
+
+      details.tensile = result;
+      if (!result) pass = false;
+    }
+
+    // Elongation
+    if (rule.elongationMin !== null) {
+      const result = elongation >= rule.elongationMin;
+      details.elongation = result;
+      if (!result) pass = false;
+    }
+
+    // Flattening
+    if (config.flatteningRequired) {
+      const result = flattening === true;
+      details.flattening = result;
+      if (!result) pass = false;
+    }
+
+    // Drift
+    if (config.driftRequired) {
+      const result = drift === true;
+      details.drift = result;
       if (!result) pass = false;
     }
 

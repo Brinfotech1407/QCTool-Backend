@@ -13,6 +13,7 @@ enum RuleType {
   RATIO_PERCENT
   FORMULA
   CHEMICAL_COMPOSITION
+  MECHANICAL_PROPERTIES
 }
 
 datasource db {
