@@ -161,12 +161,40 @@ export class RuleEngineService {
   }
 
   private evaluateChemicalComposition(config: any, batchContext: any) {
-    const { grade, cuAg, p, o } = batchContext;
+    const { grade } = batchContext;
 
     console.log("Incoming grade:", grade);
     console.log("Available grades:", config.grades);
 
-    const gradeRule = config.grades.find(
+    let columns = config.columns;
+    let grades = config.grades;
+
+    if (!columns) {
+      columns = [
+        { id: 'cuAgMin', name: 'Cu + Ag', type: 'MIN' },
+        { id: 'pMin', name: 'P', type: 'MIN' },
+        { id: 'pMax', name: 'P', type: 'MAX' },
+        { id: 'oMax', name: 'O', type: 'MAX' }
+      ];
+      grades = (grades || []).map((g: any) => ({
+        key: g.key,
+        values: {
+          cuAgMin: g.cuAgMin ?? null,
+          pMin: g.pMin ?? null,
+          pMax: g.pMax ?? null,
+          oMax: g.oMax ?? null,
+        }
+      }));
+    }
+
+    const chemicalValues = batchContext.chemicalValues || {
+      cuAgMin: batchContext.cuAg,
+      pMin: batchContext.p,
+      pMax: batchContext.p,
+      oMax: batchContext.o,
+    };
+
+    const gradeRule = grades.find(
       (g: any) =>
         g.key?.trim().toLowerCase() ===
         grade?.trim().toLowerCase()
@@ -182,32 +210,29 @@ export class RuleEngineService {
     let pass = true;
     const details: any = {};
 
-    // Cu + Ag (Min only)
-    if (gradeRule.cuAgMin !== null && gradeRule.cuAgMin !== undefined) {
-      const result = cuAg >= gradeRule.cuAgMin;
-      details.cuAg = result;
-      if (!result) pass = false;
-    }
+    for (const col of columns) {
+      const requiredVal = gradeRule.values?.[col.id];
+      
+      // If the limit value is 0 or null, we skip validation for this column
+      if (requiredVal === undefined || requiredVal === null || requiredVal === 0) {
+        continue;
+      }
 
-    // P Range
-    if (
-      gradeRule.pMin !== null &&
-      gradeRule.pMax !== null
-    ) {
-      const result =
-        p >= gradeRule.pMin &&
-        p <= gradeRule.pMax;
-      details.p = result;
-      if (!result) pass = false;
-    }
+      const actualVal = chemicalValues[col.id];
+      if (actualVal === undefined || actualVal === null) {
+        pass = false; // Missing value fails validation if it's required
+        details[col.name] = false;
+        continue;
+      }
 
-    // O Max
-    if (
-      gradeRule.oMax !== null &&
-      gradeRule.oMax !== undefined
-    ) {
-      const result = o <= gradeRule.oMax;
-      details.o = result;
+      let result = false;
+      if (col.type === 'MIN') {
+        result = actualVal >= requiredVal;
+      } else if (col.type === 'MAX') {
+        result = actualVal <= requiredVal;
+      }
+
+      details[col.name] = result;
       if (!result) pass = false;
     }
 
