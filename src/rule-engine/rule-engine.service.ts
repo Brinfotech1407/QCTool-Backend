@@ -34,6 +34,10 @@ export class RuleEngineService {
           return this.evaluateMechanical(ruleConfig, batchContext);
         case RuleType.GENERIC_CONDITION:
           return this.evaluateGeneric(parameter.ruleDefinition.ruleConfig, batchContext);
+        case RuleType.TEXT_BOOLEAN:
+          return this.evaluateTextBoolean(ruleConfig, batchContext);
+        case RuleType.TEXT_NUMERIC:
+          return this.evaluateTextNumeric(ruleConfig, batchContext);
         default:
           throw new Error('Unsupported rule type');
       }
@@ -363,5 +367,53 @@ export class RuleEngineService {
     }
 
     return { pass, details };
+  }
+
+  private evaluateTextBoolean(config: any, batchContext: any) {
+
+    const { booleanResult, grade } = batchContext;
+
+    // Grade restriction
+    if (config.applicableGrades?.length > 0) {
+      if (!config.applicableGrades.includes(grade)) {
+        return {
+          pass: true,
+          skipped: true,
+          reason: 'Not applicable for this grade'
+        };
+      }
+    }
+
+    const pass = booleanResult === config.expected;
+
+    return {
+      pass,
+      expected: config.expected,
+      actual: booleanResult
+    };
+  }
+
+  private evaluateTextNumeric(config: any, batchContext: any) {
+
+    const value = batchContext.numericValue;
+
+    if (value === null || value === undefined) {
+      throw new Error('Value is required');
+    }
+
+    const min = config.min ?? null;
+    const max = config.max ?? null;
+
+    const pass =
+      (min === null || value >= min) &&
+      (max === null || value <= max);
+
+    return {
+      pass,
+      value,
+      min,
+      max,
+      unit: config.unit
+    };
   }
 }
