@@ -32,6 +32,8 @@ export class RuleEngineService {
           return this.evaluateChemicalComposition(ruleConfig, batchContext);
         case RuleType.MECHANICAL_PROPERTIES:
           return this.evaluateMechanical(ruleConfig, batchContext);
+        case RuleType.GENERIC_CONDITION:
+          return this.evaluateGeneric(parameter.ruleDefinition.ruleConfig, batchContext);
         default:
           throw new Error('Unsupported rule type');
       }
@@ -212,7 +214,7 @@ export class RuleEngineService {
 
     for (const col of columns) {
       const requiredVal = gradeRule.values?.[col.id];
-      
+
       // If the limit value is 0 or null, we skip validation for this column
       if (requiredVal === undefined || requiredVal === null || requiredVal === 0) {
         continue;
@@ -290,6 +292,73 @@ export class RuleEngineService {
     if (config.driftRequired) {
       const result = drift === true;
       details.drift = result;
+      if (!result) pass = false;
+    }
+
+    return { pass, details };
+  }
+
+  private evaluateGeneric(config: any, batchContext: any) {
+
+    const { condition, dynamicValues } = batchContext;
+
+    if (!condition) {
+      throw new Error('Condition is required');
+    }
+
+    const rule = config.conditions?.find(
+      (c: any) =>
+        c.key?.trim().toLowerCase() ===
+        condition?.trim().toLowerCase()
+    );
+
+    if (!rule) {
+      throw new Error('Invalid condition selected');
+    }
+
+    let pass = true;
+    const details: any = {};
+
+    for (const field of config.fields || []) {
+
+      const fieldName = field.name;
+
+      const value = dynamicValues?.[fieldName];
+
+      if (value === undefined || value === null) {
+        details[fieldName] = {
+          error: 'Value missing',
+          pass: false
+        };
+        pass = false;
+        continue;
+      }
+
+      const ruleDef = rule.rules?.[fieldName];
+
+      if (!ruleDef) {
+        details[fieldName] = {
+          error: 'No rule defined',
+          pass: false
+        };
+        pass = false;
+        continue;
+      }
+
+      const min = ruleDef.min ?? null;
+      const max = ruleDef.max ?? null;
+
+      const result =
+        (min === null || value >= min) &&
+        (max === null || value <= max);
+
+      details[fieldName] = {
+        value,
+        min,
+        max,
+        pass: result
+      };
+
       if (!result) pass = false;
     }
 

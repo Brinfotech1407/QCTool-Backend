@@ -1,0 +1,2 @@
+-- AlterEnum
+ALTER TYPE "RuleType" ADD VALUE 'GENERIC_CONDITION';
