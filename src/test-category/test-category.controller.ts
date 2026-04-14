@@ -1,10 +1,23 @@
-import { Body, Controller, Get, Post, Query, Put, Delete, Param } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Get,
+  Post,
+  Query,
+  Put,
+  Delete,
+  Param,
+  UseGuards,
+} from '@nestjs/common';
 import { TestCategoryService } from './test-category.service';
 import { CreateCategoryDto } from './dto/create-category.dto';
 import { Roles } from '../auth/roles.decorator';
 import { UserRole } from '@prisma/client';
+import { JwtAuthGuard } from '../auth/jwt.guard';
+import { RolesGuard } from '../auth/roles.guard';
 
 @Controller('categories')
+@UseGuards(JwtAuthGuard, RolesGuard)
 export class TestCategoryController {
   constructor(private service: TestCategoryService) { }
 
@@ -14,6 +27,12 @@ export class TestCategoryController {
     return this.service.create(dto);
   }
 
+  @Roles(
+    UserRole.PLATFORM_ADMIN,
+    UserRole.COMPANY_ADMIN,
+    UserRole.QC_USER,
+    UserRole.AUDITOR,
+  )
   @Get()
   findByStandard(@Query('standardId') standardId: string) {
     return this.service.findByStandard(standardId);

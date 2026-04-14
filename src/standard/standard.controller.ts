@@ -1,10 +1,22 @@
-import { Body, Controller, Get, Post,Put, Delete,Param } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Get,
+  Post,
+  Put,
+  Delete,
+  Param,
+  UseGuards,
+} from '@nestjs/common';
 import { StandardService } from './standard.service';
 import { CreateStandardDto } from './dto/create-standard.dto';
 import { Roles } from '../auth/roles.decorator';
 import { UserRole } from '@prisma/client';
+import { JwtAuthGuard } from '../auth/jwt.guard';
+import { RolesGuard } from '../auth/roles.guard';
 
 @Controller('standards')
+@UseGuards(JwtAuthGuard, RolesGuard)
 export class StandardController {
   constructor(private service: StandardService) {}
 
@@ -14,6 +26,12 @@ export class StandardController {
     return this.service.create(dto);
   }
 
+  @Roles(
+    UserRole.PLATFORM_ADMIN,
+    UserRole.COMPANY_ADMIN,
+    UserRole.QC_USER,
+    UserRole.AUDITOR,
+  )
   @Get()
   findAll() {
     return this.service.findAll();

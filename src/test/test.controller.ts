@@ -1,11 +1,24 @@
-import { Body, Controller, Get, Post, Query, Put, Delete, Param } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Get,
+  Post,
+  Query,
+  Put,
+  Delete,
+  Param,
+  UseGuards,
+} from '@nestjs/common';
 import { TestService } from './test.service';
 import { CreateTestDto } from './dto/create-test.dto';
 import { Roles } from '../auth/roles.decorator';
 import { UserRole } from '@prisma/client';
 import { RuleEngineService } from '../rule-engine/rule-engine.service';
 import { PrismaService } from '../prisma/prisma.service';
+import { JwtAuthGuard } from '../auth/jwt.guard';
+import { RolesGuard } from '../auth/roles.guard';
 @Controller('tests')
+@UseGuards(JwtAuthGuard, RolesGuard)
 export class TestController {
   constructor(private service: TestService, private readonly prisma: PrismaService,
     private readonly ruleEngine: RuleEngineService,) { }
@@ -16,21 +29,30 @@ export class TestController {
     return this.service.create(dto);
   }
 
+  @Roles(
+    UserRole.PLATFORM_ADMIN,
+    UserRole.COMPANY_ADMIN,
+    UserRole.QC_USER,
+    UserRole.AUDITOR,
+  )
   @Get()
   findByCategory(@Query('categoryId') categoryId: string) {
     return this.service.findByCategory(categoryId);
   }
 
+  @Roles(UserRole.PLATFORM_ADMIN)
   @Put(':id')
   update(@Param('id') id: string, @Body() dto: CreateTestDto) {
     return this.service.update(id, dto);
   }
 
+  @Roles(UserRole.PLATFORM_ADMIN)
   @Delete(':id')
   remove(@Param('id') id: string) {
     return this.service.remove(id);
   }
 
+  @Roles(UserRole.PLATFORM_ADMIN)
   @Get('debug-od')
   async debugOD() {
 
@@ -55,6 +77,7 @@ export class TestController {
     return result;
   }
 
+  @Roles(UserRole.PLATFORM_ADMIN)
   @Get('debug-wt')
   async debugWT() {
 
@@ -78,5 +101,4 @@ export class TestController {
     return result;
   }
 }
-
 
