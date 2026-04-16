@@ -12,11 +12,15 @@ import { TestModule } from './test/test.module';
 import { ParameterModule } from './parameter/parameter.module';
 import { RuleEngineModule } from './rule-engine/rule-engine.module';
 import { RuleDefinitionModule } from './rule-definition/rule-definition';
+import { HitModule } from './hit/hit.module';
+import { BatchModule } from './batch/batch.module';
+import { CompanyTestConfigModule } from './company-test-config/company-test-config.module';
+import { BatchTestsModule } from './batch-tests/batch-tests.module';
 
 
 
 @Module({
-  imports: [ConfigModule.forRoot({ isGlobal: true }),PrismaModule, CompanyModule, UserModule, AuthModule, StandardModule, TestCategoryModule, TestModule, ParameterModule, RuleEngineModule,RuleDefinitionModule,],
+  imports: [ConfigModule.forRoot({ isGlobal: true }),PrismaModule, CompanyModule, UserModule, AuthModule, StandardModule, TestCategoryModule, TestModule, ParameterModule, RuleEngineModule,RuleDefinitionModule, HitModule, BatchModule, CompanyTestConfigModule, BatchTestsModule],
   controllers: [AppController],
   providers: [AppService],
 })
