@@ -4,32 +4,66 @@ import {
   IsNotEmpty,
   IsNumber,
   IsObject,
+  IsOptional,
   IsString,
   Min,
 } from 'class-validator';
 
 export class CreateHitDto {
+  @IsOptional()
   @IsString()
-  @IsNotEmpty()
-  inwardPartyName: string;
+  hitNumber?: string;
 
   @IsString()
   @IsNotEmpty()
-  inwardPartyTcNumber: string;
+  gradeId: string;
+
+  @Type(() => Number)
+  @IsNumber()
+  od: number;
+
+  @Type(() => Number)
+  @IsNumber()
+  thickness: number;
+
+  @Type(() => Number)
+  @IsNumber()
+  length: number;
+
+  @IsString()
+  @IsNotEmpty()
+  condition: string;
+
+  @Type(() => Number)
+  @IsNumber()
+  weight: number;
+
+  @IsOptional()
+  @IsString()
+  @IsNotEmpty()
+  inwardPartyName?: string;
+
+  @IsOptional()
+  @IsString()
+  @IsNotEmpty()
+  inwardPartyTcNumber?: string;
 
   @IsObject()
   chemicalComposition: Record<string, unknown>;
 
+  @IsOptional()
   @IsString()
   @IsNotEmpty()
-  size: string;
+  size?: string;
 
+  @IsOptional()
   @Type(() => Number)
   @IsNumber()
   @Min(0.000001)
-  quantity: number;
+  quantity?: number;
 
+  @IsOptional()
   @Type(() => Date)
   @IsDate()
-  inwardDate: Date;
+  inwardDate?: Date;
 }

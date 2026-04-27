@@ -51,14 +51,14 @@ generator client {
 }
 
 model Company {
-  id        String   @id @default(uuid())
-  name      String
-  code      String   @unique
-  active    Boolean  @default(true)
-  createdAt DateTime @default(now())
-  users     User[]
-  hits      HitEntry[]
-  batches   Batch[]
+  id          String              @id @default(uuid())
+  name        String
+  code        String              @unique
+  active      Boolean             @default(true)
+  createdAt   DateTime            @default(now())
+  users       User[]
+  hits        HitEntry[]
+  batches     Batch[]
   testConfigs CompanyTestConfig[]
 }
 
@@ -71,59 +71,96 @@ model User {
   active   Boolean  @default(true)
 
   companyId String?
-  company   Company? @relation(fields: [companyId], references: [id])
+  company   Company?   @relation(fields: [companyId], references: [id])
   hits      HitEntry[] @relation("HitCreatedBy")
-  batches   Batch[] @relation("BatchCreatedBy")
+  batches   Batch[]    @relation("BatchCreatedBy")
 
   createdAt DateTime @default(now())
 }
 
 model HitEntry {
-  id                   String    @id @default(uuid())
-  hitNumber            String    @unique
-  inwardPartyName      String
-  inwardPartyTcNumber  String
-  chemicalComposition  Json
-  size                 String
-  quantity             Float
-  availableQuantity    Float
-  inwardDate           DateTime
-  companyId            String
-  createdById          String
-  status               HitStatus @default(RECEIVED)
-  createdAt            DateTime  @default(now())
-  updatedAt            DateTime  @updatedAt
-  isDeleted            Boolean   @default(false)
+  id        String @id @default(uuid())
+  hitNumber String @unique
 
-  company   Company @relation(fields: [companyId], references: [id])
-  createdBy User    @relation("HitCreatedBy", fields: [createdById], references: [id])
-  batches   Batch[]
+  gradeId         String @default("DEFAULT")
+  od              Float  @default(0)
+  thickness       Float  @default(0)
+  length          Float  @default(0)
+  condition       String @default("NA")
+  weight          Float  @default(0)
+  availableWeight Float  @default(0)
+
+  inwardPartyName     String?
+  inwardPartyTcNumber String?
+  chemicalComposition Json
+  size                String?
+  quantity            Float?
+  availableQuantity   Float?
+  inwardDate          DateTime?
+
+  companyId   String
+  createdById String
+  status      HitStatus @default(RECEIVED)
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  isDeleted   Boolean   @default(false)
+
+  company   Company    @relation(fields: [companyId], references: [id])
+  createdBy User       @relation("HitCreatedBy", fields: [createdById], references: [id])
+  batchHits BatchHit[]
 
   @@index([companyId, createdAt])
   @@index([companyId, status])
   @@index([companyId, inwardDate])
+  @@index([companyId])
+  @@index([gradeId])
 }
 
 model Batch {
-  id                String      @id @default(uuid())
-  batchNumber       String      @unique
-  outwardPartyCode  String
-  requiredSize      String
-  requiredQuantity  Float
-  hitId             String
-  companyId         String
-  createdById       String
-  status            BatchStatus @default(CREATED)
-  createdAt         DateTime    @default(now())
+  id          String @id @default(uuid())
+  batchNumber String @unique
 
-  hit       HitEntry @relation(fields: [hitId], references: [id])
-  company   Company  @relation(fields: [companyId], references: [id])
-  createdBy User     @relation("BatchCreatedBy", fields: [createdById], references: [id])
+  gradeId String @default("DEFAULT")
+  condition String @default("NA")
+
+  outwardPartyCode String?
+  od               Float  @default(0)
+  thickness        Float  @default(0)
+  length           Float  @default(0)
+  requiredSize     String?
+  requiredQuantity Float
+
+  companyId   String
+  createdById String
+  status      BatchStatus @default(CREATED)
+  createdAt   DateTime    @default(now())
+
+  company    Company     @relation(fields: [companyId], references: [id])
+  createdBy  User        @relation("BatchCreatedBy", fields: [createdById], references: [id])
   batchTests BatchTest[]
+  batchHits  BatchHit[]
 
   @@index([companyId, createdAt])
   @@index([companyId, status])
-  @@index([companyId, hitId])
+  @@index([companyId])
+  @@index([gradeId])
+}
+
+model BatchHit {
+  id String @id @default(uuid())
+
+  batchId String
+  hitId   String
+
+  usedQty Float
+
+  createdAt DateTime @default(now())
+
+  batch Batch    @relation(fields: [batchId], references: [id])
+  hit   HitEntry @relation(fields: [hitId], references: [id])
+
+  @@index([batchId])
+  @@index([hitId])
 }
 
 model Standard {
@@ -132,7 +169,7 @@ model Standard {
   code     String  @unique
   isGlobal Boolean @default(true)
 
-  categories TestCategory[]
+  categories         TestCategory[]
   companyTestConfigs CompanyTestConfig[]
 
   createdAt DateTime @default(now())
@@ -147,7 +184,7 @@ model TestCategory {
 
   companyId String?
 
-  tests Test[]
+  tests              Test[]
   companyTestConfigs CompanyTestConfig[]
 
   createdAt DateTime @default(now())
@@ -163,9 +200,9 @@ model Test {
 
   companyId String?
 
-  parameters TestParameter[]
+  parameters         TestParameter[]
   companyTestConfigs CompanyTestConfig[]
-  batchTests BatchTest[]
+  batchTests         BatchTest[]
 
   createdAt DateTime @default(now())
 }
@@ -218,7 +255,7 @@ model TestParameter {
 
   defaultCriteria AcceptanceCriteria?
 
-  ruleDefinition RuleDefinition?  // <-- NEW
+  ruleDefinition RuleDefinition? // <-- NEW
 
   overrides CompanyParameterOverride[]
 
@@ -226,13 +263,13 @@ model TestParameter {
 }
 
 model RuleDefinition {
-  id           String   @id @default(uuid())
-  parameterId  String   @unique
-  ruleType     RuleType
-  ruleConfig   Json
-  createdAt    DateTime @default(now())
+  id          String   @id @default(uuid())
+  parameterId String   @unique
+  ruleType    RuleType
+  ruleConfig  Json
+  createdAt   DateTime @default(now())
 
-  parameter    TestParameter @relation(fields: [parameterId], references: [id], onDelete: Cascade)
+  parameter TestParameter @relation(fields: [parameterId], references: [id], onDelete: Cascade)
 }
 
 model AcceptanceCriteria {

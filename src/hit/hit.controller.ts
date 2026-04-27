@@ -1,6 +1,7 @@
 import {
   Body,
   Controller,
+  Delete,
   Get,
   Param,
   Patch,
@@ -57,5 +58,11 @@ export class HitController {
     @Body() dto: UpdateHitDto,
   ) {
     return this.hitService.update(req.user, id, dto);
+  }
+
+  @Roles(UserRole.QC_USER)
+  @Delete(':id')
+  remove(@Req() req: JwtRequest, @Param('id') id: string) {
+    return this.hitService.remove(req.user, id);
   }
 }

@@ -4,6 +4,7 @@ import {
   IsIn,
   IsNotEmpty,
   IsNumber,
+  IsObject,
   IsOptional,
   IsString,
   Min,
@@ -40,4 +41,38 @@ export class UpdateHitDto {
   @IsOptional()
   @IsIn(HIT_STATUS_VALUES)
   status?: HitStatusValue;
+
+  @IsOptional()
+  @IsString()
+  @IsNotEmpty()
+  gradeId?: string;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  od?: number;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  thickness?: number;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  length?: number;
+
+  @IsOptional()
+  @IsString()
+  @IsNotEmpty()
+  condition?: string;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  weight?: number;
+
+  @IsOptional()
+  @IsObject()
+  chemicalComposition?: Record<string, unknown>;
 }

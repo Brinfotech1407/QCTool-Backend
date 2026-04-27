@@ -1,5 +1,12 @@
 import { Type } from 'class-transformer';
-import { IsDate, IsIn, IsInt, IsOptional, Min } from 'class-validator';
+import {
+  IsDate,
+  IsIn,
+  IsInt,
+  IsOptional,
+  IsString,
+  Min,
+} from 'class-validator';
 
 export const HIT_STATUS_VALUES = [
   'RECEIVED',
@@ -11,6 +18,14 @@ export const HIT_STATUS_VALUES = [
 export type HitStatusValue = (typeof HIT_STATUS_VALUES)[number];
 
 export class QueryHitDto {
+  @IsOptional()
+  @IsString()
+  gradeId?: string;
+
+  @IsOptional()
+  @IsString()
+  condition?: string;
+
   @IsOptional()
   @IsIn(HIT_STATUS_VALUES)
   status?: HitStatusValue;

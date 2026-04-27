@@ -1,6 +1,7 @@
 import {
   Body,
   Controller,
+  Delete,
   Get,
   Param,
   Post,
@@ -45,5 +46,11 @@ export class BatchController {
   @Get(':id')
   findOne(@Req() req: JwtRequest, @Param('id') id: string) {
     return this.batchService.findOne(req.user, id);
+  }
+
+  @Roles(UserRole.COMPANY_ADMIN, UserRole.QC_USER)
+  @Delete(':id')
+  remove(@Req() req: JwtRequest, @Param('id') id: string) {
+    return this.batchService.deleteBatch(id, req.user);
   }
 }

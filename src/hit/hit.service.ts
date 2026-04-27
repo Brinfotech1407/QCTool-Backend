@@ -36,12 +36,19 @@ export class HitService {
     this.ensureCompanyScopedUser(user);
 
     for (let attempt = 0; attempt < 3; attempt += 1) {
-      const hitNumber = await this.generateHitNumber(dto.inwardDate);
+      const hitNumber = dto.hitNumber || await this.generateHitNumber(dto.inwardDate || new Date());
 
       try {
         return await this.hitEntry.create({
           data: {
             hitNumber,
+            gradeId: dto.gradeId,
+            od: dto.od,
+            thickness: dto.thickness,
+            length: dto.length,
+            condition: dto.condition,
+            weight: dto.weight,
+            availableWeight: dto.weight,
             inwardPartyName: dto.inwardPartyName,
             inwardPartyTcNumber: dto.inwardPartyTcNumber,
             chemicalComposition: dto.chemicalComposition as Prisma.InputJsonValue,
@@ -58,6 +65,9 @@ export class HitService {
           error instanceof Prisma.PrismaClientKnownRequestError &&
           error.code === 'P2002'
         ) {
+          if (dto.hitNumber) {
+            throw new BadRequestException('Provided hitNumber already exists');
+          }
           continue;
         }
 
@@ -126,10 +136,22 @@ export class HitService {
       throw new NotFoundException('HIT entry not found');
     }
 
+    if (dto.chemicalComposition) {
+      throw new BadRequestException('Chemical composition cannot be updated');
+    }
+
     if (dto.quantity !== undefined && dto.quantity !== existing.quantity) {
       if (existing.availableQuantity !== existing.quantity) {
         throw new BadRequestException(
           'Quantity cannot be updated after stock has been consumed',
+        );
+      }
+    }
+
+    if (dto.weight !== undefined && dto.weight !== existing.weight) {
+      if (existing.availableWeight !== existing.weight) {
+        throw new BadRequestException(
+          'Weight cannot be updated after stock has been consumed',
         );
       }
     }
@@ -142,12 +164,24 @@ export class HitService {
       status?: HitStatusValue;
       quantity?: number;
       availableQuantity?: number;
+      gradeId?: string;
+      od?: number;
+      thickness?: number;
+      length?: number;
+      condition?: string;
+      weight?: number;
+      availableWeight?: number;
     } = {
       inwardPartyName: dto.inwardPartyName,
       inwardPartyTcNumber: dto.inwardPartyTcNumber,
       size: dto.size,
       inwardDate: dto.inwardDate,
       status: dto.status,
+      gradeId: dto.gradeId,
+      od: dto.od,
+      thickness: dto.thickness,
+      length: dto.length,
+      condition: dto.condition,
     };
 
     if (dto.quantity !== undefined) {
@@ -155,9 +189,43 @@ export class HitService {
       data.availableQuantity = dto.quantity;
     }
 
+    if (dto.weight !== undefined) {
+      data.weight = dto.weight;
+      data.availableWeight = dto.weight;
+    }
+
     return this.hitEntry.update({
       where: { id: existing.id },
       data,
+    });
+  }
+
+  async remove(user: JwtUser, id: string) {
+    this.ensureCompanyScopedUser(user);
+
+    const existing = await this.hitEntry.findFirst({
+      where: {
+        id,
+        companyId: user.companyId!,
+        isDeleted: false,
+      },
+    });
+
+    if (!existing) {
+      throw new NotFoundException('HIT entry not found');
+    }
+
+    if (existing.availableWeight < existing.weight) {
+      throw new BadRequestException(
+        'HIT cannot be deleted after stock has been consumed',
+      );
+    }
+
+    return this.hitEntry.update({
+      where: { id: existing.id },
+      data: {
+        isDeleted: true,
+      },
     });
   }
 
@@ -197,6 +265,14 @@ export class HitService {
 
     if (query.status) {
       where.status = query.status;
+    }
+
+    if (query.gradeId) {
+      where.gradeId = query.gradeId;
+    }
+
+    if (query.condition) {
+      where.condition = query.condition;
     }
 
     if (query.startDate || query.endDate) {
