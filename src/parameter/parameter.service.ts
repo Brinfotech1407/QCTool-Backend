@@ -1,4 +1,5 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, NotFoundException } from '@nestjs/common';
+import { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateParameterDto } from './dto/create-parameter.dto';
 
@@ -72,8 +73,37 @@ export class ParameterService {
 
 
   remove(id: string) {
-    return this.prisma.testParameter.delete({
-      where: { id },
+    return this.prisma.$transaction(async (tx) => {
+      await tx.qCTestResult.deleteMany({
+        where: { ruleId: id },
+      });
+
+      await tx.companyParameterOverride.deleteMany({
+        where: { parameterId: id },
+      });
+
+      await tx.ruleDefinition.deleteMany({
+        where: { parameterId: id },
+      });
+
+      await tx.acceptanceCriteria.deleteMany({
+        where: { parameterId: id },
+      });
+
+      try {
+        return await tx.testParameter.delete({
+          where: { id },
+        });
+      } catch (error) {
+        if (
+          error instanceof Prisma.PrismaClientKnownRequestError &&
+          error.code === 'P2025'
+        ) {
+          throw new NotFoundException('Parameter not found');
+        }
+
+        throw error;
+      }
     });
   }
 }

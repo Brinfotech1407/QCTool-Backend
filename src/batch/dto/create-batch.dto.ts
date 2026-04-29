@@ -1,7 +1,51 @@
 import { Type } from 'class-transformer';
-import { IsArray, IsNotEmpty, IsNumber, IsOptional, IsString, Min, ValidateNested } from 'class-validator';
+import {
+  ArrayMinSize,
+  IsArray,
+  IsNotEmpty,
+  IsNumber,
+  IsOptional,
+  IsString,
+  Min,
+  ValidateNested,
+} from 'class-validator';
 
-export class BatchHitItemDto {
+export class CreateBatchItemDto {
+  @Type(() => Number)
+  @IsNumber()
+  od: number;
+
+  @Type(() => Number)
+  @IsNumber()
+  wt: number;
+
+  @Type(() => Number)
+  @IsNumber()
+  @Min(0.000001)
+  qty: number;
+
+  @IsString()
+  @IsNotEmpty()
+  condition: string;
+
+  @Type(() => Number)
+  @IsNumber()
+  length: number;
+}
+
+export class CreateBatchCustomerDto {
+  @IsString()
+  @IsNotEmpty()
+  name: string;
+
+  @IsArray()
+  @ArrayMinSize(1)
+  @ValidateNested({ each: true })
+  @Type(() => CreateBatchItemDto)
+  items: CreateBatchItemDto[];
+}
+
+export class CreateBatchSelectedHitDto {
   @IsString()
   @IsNotEmpty()
   hitId: string;
@@ -15,48 +59,26 @@ export class BatchHitItemDto {
 export class CreateBatchDto {
   @IsString()
   @IsNotEmpty()
-  gradeId: string;
+  batchNumber: string;
 
-  @IsOptional()
   @IsString()
   @IsNotEmpty()
-  condition?: string;
-
-  @IsOptional()
-  @IsString()
-  @IsNotEmpty()
-  outwardPartyCode?: string;
-
-  @IsOptional()
-  @IsString()
-  @IsNotEmpty()
-  requiredSize?: string;
-
-  @IsOptional()
-  @Type(() => Number)
-  @IsNumber()
-  @Min(0.000001)
-  od?: number;
-
-  @IsOptional()
-  @Type(() => Number)
-  @IsNumber()
-  @Min(0.000001)
-  thickness?: number;
-
-  @IsOptional()
-  @Type(() => Number)
-  @IsNumber()
-  @Min(0.000001)
-  length?: number;
+  grade: string;
 
   @Type(() => Number)
   @IsNumber()
   @Min(0.000001)
-  requiredQuantity: number;
+  totalQty: number;
 
   @IsArray()
+  @ArrayMinSize(1)
   @ValidateNested({ each: true })
-  @Type(() => BatchHitItemDto)
-  hits: BatchHitItemDto[];
+  @Type(() => CreateBatchCustomerDto)
+  customers: CreateBatchCustomerDto[];
+
+  @IsOptional()
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => CreateBatchSelectedHitDto)
+  selectedHits?: CreateBatchSelectedHitDto[];
 }

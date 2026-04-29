@@ -89,6 +89,13 @@ export class HitService {
     const [items, total] = await Promise.all([
       this.hitEntry.findMany({
         where,
+        include: {
+          _count: {
+            select: {
+              batchHits: true,
+            },
+          },
+        },
         orderBy: { createdAt: 'desc' },
         skip: (page - 1) * pageSize,
         take: pageSize,
@@ -97,7 +104,10 @@ export class HitService {
     ]);
 
     return {
-      items,
+      items: items.map((item: any) => ({
+        ...item,
+        linkedBatchCount: item._count?.batchHits ?? 0,
+      })),
       page,
       pageSize,
       total,

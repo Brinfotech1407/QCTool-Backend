@@ -1,4 +1,5 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, NotFoundException } from '@nestjs/common';
+import { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateTestDto } from './dto/create-test.dto';
 
@@ -34,8 +35,89 @@ export class TestService {
   }
 
   remove(id: string) {
-    return this.prisma.test.delete({
-      where: { id },
+    return this.prisma.$transaction(async (tx) => {
+      const test = await tx.test.findUnique({
+        where: { id },
+        select: {
+          id: true,
+          parameters: {
+            select: {
+              id: true,
+            },
+          },
+        },
+      });
+
+      if (!test) {
+        throw new NotFoundException('Test not found');
+      }
+
+      const parameterIds = test.parameters.map((parameter) => parameter.id);
+
+      if (parameterIds.length > 0) {
+        await tx.qCTestResult.deleteMany({
+          where: {
+            ruleId: {
+              in: parameterIds,
+            },
+          },
+        });
+
+        await tx.companyParameterOverride.deleteMany({
+          where: {
+            parameterId: {
+              in: parameterIds,
+            },
+          },
+        });
+
+        await tx.ruleDefinition.deleteMany({
+          where: {
+            parameterId: {
+              in: parameterIds,
+            },
+          },
+        });
+
+        await tx.acceptanceCriteria.deleteMany({
+          where: {
+            parameterId: {
+              in: parameterIds,
+            },
+          },
+        });
+
+        await tx.testParameter.deleteMany({
+          where: {
+            id: {
+              in: parameterIds,
+            },
+          },
+        });
+      }
+
+      await tx.companyTestConfig.deleteMany({
+        where: { testId: id },
+      });
+
+      await tx.batchTest.deleteMany({
+        where: { testId: id },
+      });
+
+      try {
+        return await tx.test.delete({
+          where: { id },
+        });
+      } catch (error) {
+        if (
+          error instanceof Prisma.PrismaClientKnownRequestError &&
+          error.code === 'P2025'
+        ) {
+          throw new NotFoundException('Test not found');
+        }
+
+        throw error;
+      }
     });
   }
 }

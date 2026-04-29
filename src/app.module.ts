@@ -16,11 +16,12 @@ import { HitModule } from './hit/hit.module';
 import { BatchModule } from './batch/batch.module';
 import { CompanyTestConfigModule } from './company-test-config/company-test-config.module';
 import { BatchTestsModule } from './batch-tests/batch-tests.module';
+import { QcTestsModule } from './qc-tests/qc-tests.module';
 
 
 
 @Module({
-  imports: [ConfigModule.forRoot({ isGlobal: true }),PrismaModule, CompanyModule, UserModule, AuthModule, StandardModule, TestCategoryModule, TestModule, ParameterModule, RuleEngineModule,RuleDefinitionModule, HitModule, BatchModule, CompanyTestConfigModule, BatchTestsModule],
+  imports: [ConfigModule.forRoot({ isGlobal: true }),PrismaModule, CompanyModule, UserModule, AuthModule, StandardModule, TestCategoryModule, TestModule, ParameterModule, RuleEngineModule,RuleDefinitionModule, HitModule, BatchModule, CompanyTestConfigModule, BatchTestsModule, QcTestsModule],
   controllers: [AppController],
   providers: [AppService],
 })

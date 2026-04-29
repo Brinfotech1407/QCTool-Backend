@@ -66,7 +66,12 @@ export class RuleEngineService {
       (b: any) => nominal > b.min && nominal <= b.max
     );
 
-    if (!band) throw new Error('No matching band');
+    if (!band) {
+      return {
+        pass: false,
+        error: 'No matching band for the provided nominal value',
+      };
+    }
 
     const tolerance = band.tolerance;
 
@@ -85,13 +90,23 @@ export class RuleEngineService {
     const row = config.rows.find((r: any) => wt > r.min && wt <= r.max);
     const col = config.columns.find((c: any) => od > c.min && od <= c.max);
 
-    if (!row || !col) throw new Error('No matching matrix band');
+    if (!row || !col) {
+      return {
+        pass: false,
+        error: 'No matching matrix band for the provided OD / wall thickness',
+      };
+    }
 
     const cell = config.matrix.find(
       (m: any) => m.row === row.key && m.col === col.key
     );
 
-    if (!cell) throw new Error('No matrix value found');
+    if (!cell) {
+      return {
+        pass: false,
+        error: 'No matrix tolerance value found for the selected OD / wall thickness',
+      };
+    }
 
     const tolerance = cell.tolerance;
 
@@ -113,7 +128,12 @@ export class RuleEngineService {
       (b: any) => ratio > b.min && ratio <= b.max
     );
 
-    if (!band) throw new Error('No matching ratio band');
+    if (!band) {
+      return {
+        pass: false,
+        error: 'No matching ratio band for the provided OD / wall thickness',
+      };
+    }
 
     const percent1 = band.percent1;
     const percent2 = band.percent2 || null;
@@ -145,7 +165,12 @@ export class RuleEngineService {
       (b) => nominal >= b.min && nominal <= b.max
     );
 
-    if (!band) throw new Error('No matching band');
+    if (!band) {
+      return {
+        pass: false,
+        error: 'No matching band for the provided nominal value',
+      };
+    }
 
     const min = nominal - (band.minus || 0);
     const max = nominal + (band.plus || 0);
@@ -307,7 +332,10 @@ export class RuleEngineService {
     const { condition, dynamicValues } = batchContext;
 
     if (!condition) {
-      throw new Error('Condition is required');
+      return {
+        pass: false,
+        error: 'Condition is required',
+      };
     }
 
     const rule = config.conditions?.find(
@@ -317,7 +345,10 @@ export class RuleEngineService {
     );
 
     if (!rule) {
-      throw new Error('Invalid condition selected');
+      return {
+        pass: false,
+        error: 'Invalid condition selected',
+      };
     }
 
     let pass = true;

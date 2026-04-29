@@ -120,6 +120,8 @@ model Batch {
   id          String @id @default(uuid())
   batchNumber String @unique
 
+  grade   String @default("")
+  totalQty Float @default(0)
   gradeId String @default("DEFAULT")
   condition String @default("NA")
 
@@ -137,13 +139,42 @@ model Batch {
 
   company    Company     @relation(fields: [companyId], references: [id])
   createdBy  User        @relation("BatchCreatedBy", fields: [createdById], references: [id])
+  customers  BatchCustomer[]
   batchTests BatchTest[]
   batchHits  BatchHit[]
+  qcTests    QCTest[]
 
   @@index([companyId, createdAt])
   @@index([companyId, status])
   @@index([companyId])
   @@index([gradeId])
+}
+
+model BatchCustomer {
+  id      String @id @default(uuid())
+  name    String
+  batchId String
+
+  batch Batch @relation(fields: [batchId], references: [id], onDelete: Cascade)
+  items BatchItem[]
+  qcTests QCTest[]
+
+  @@index([batchId])
+}
+
+model BatchItem {
+  id         String @id @default(uuid())
+  customerId String
+
+  customer  BatchCustomer @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  od        Float
+  wt        Float
+  qty       Float
+  condition String
+  length    Float
+  qcTests   QCTest[]
+
+  @@index([customerId])
 }
 
 model BatchHit {
@@ -258,8 +289,42 @@ model TestParameter {
   ruleDefinition RuleDefinition? // <-- NEW
 
   overrides CompanyParameterOverride[]
+  qcTestResults QCTestResult[]
 
   createdAt DateTime @default(now())
+}
+
+model QCTest {
+  id         String   @id @default(uuid())
+  batchId    String
+  customerId String
+  itemId     String
+  createdAt  DateTime @default(now())
+
+  batch    Batch         @relation(fields: [batchId], references: [id], onDelete: Cascade)
+  customer BatchCustomer @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  item     BatchItem     @relation(fields: [itemId], references: [id], onDelete: Cascade)
+  tests    QCTestResult[]
+
+  @@index([batchId])
+  @@index([customerId])
+  @@index([itemId])
+}
+
+model QCTestResult {
+  id       String  @id @default(uuid())
+  qcTestId String
+  ruleId   String
+  observed Float
+  min      Float?
+  max      Float?
+  status   String
+
+  qcTest QCTest         @relation(fields: [qcTestId], references: [id], onDelete: Cascade)
+  rule   TestParameter  @relation(fields: [ruleId], references: [id], onDelete: Cascade)
+
+  @@index([qcTestId])
+  @@index([ruleId])
 }
 
 model RuleDefinition {
