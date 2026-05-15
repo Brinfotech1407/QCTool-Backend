@@ -299,6 +299,7 @@ model QCTest {
   batchId    String
   customerId String
   itemId     String
+  status     String   @default("PENDING")
   createdAt  DateTime @default(now())
 
   batch    Batch         @relation(fields: [batchId], references: [id], onDelete: Cascade)

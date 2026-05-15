@@ -15,6 +15,35 @@ type JwtUser = {
   companyId: string | null;
 };
 
+type CustomerTcData = {
+  batch: {
+    id: string;
+    batchNumber: string;
+    grade?: string;
+    gradeId?: string;
+    condition?: string;
+  };
+  customer: {
+    id: string;
+    name: string;
+  };
+  items: Array<{
+    id: string;
+    od: number;
+    wt: number;
+    qty?: number;
+    condition?: string;
+    length?: number;
+    status: string;
+    categories: Array<{
+      name: string;
+      sequence: number;
+      rules: Array<Record<string, unknown>>;
+    }>;
+  }>;
+  chemicalComposition?: unknown;
+};
+
 type BatchWithNestedItems = {
   id: string;
   companyId: string;
@@ -137,12 +166,16 @@ export class QcTestsService {
     const results = dto.tests.map((entry) => {
       return this.buildStoredResultsForEntry(batch, item, applicableRulesById, entry);
     }).flat();
+    const qcStatus = results.some((result) => result.status === 'FAIL')
+      ? 'FAIL'
+      : 'PASS';
 
     return this.prisma.qCTest.create({
       data: {
         batchId: dto.batchId,
         customerId: dto.customerId,
         itemId: dto.itemId,
+        status: qcStatus,
         tests: {
           create: results,
         },
@@ -160,6 +193,55 @@ export class QcTestsService {
         },
       },
     });
+  }
+
+  async list(user: JwtUser) {
+    const records = await this.prisma.qCTest.findMany({
+      where: this.getQcRecordScope(user),
+      include: {
+        batch: {
+          select: {
+            id: true,
+            batchNumber: true,
+          },
+        },
+        customer: {
+          select: {
+            id: true,
+            name: true,
+          },
+        },
+        item: {
+          select: {
+            id: true,
+            od: true,
+            wt: true,
+            condition: true,
+            length: true,
+          },
+        },
+      },
+      orderBy: {
+        createdAt: 'desc',
+      },
+    });
+
+    return records.map((record) => ({
+      id: record.id,
+      batchId: record.batchId,
+      batchNumber: record.batch.batchNumber,
+      customerId: record.customerId,
+      customerName: record.customer.name,
+      itemId: record.itemId,
+      item: {
+        od: record.item.od,
+        wt: record.item.wt,
+        condition: record.item.condition,
+        length: record.item.length,
+      },
+      status: record.status,
+      createdAt: record.createdAt,
+    }));
   }
 
   private buildStoredResultsForEntry(
@@ -467,6 +549,286 @@ export class QcTestsService {
     };
   }
 
+  async getRecord(user: JwtUser, id: string) {
+    const qcTest = await this.prisma.qCTest.findFirst({
+      where: {
+        id,
+        ...this.getQcRecordScope(user),
+      },
+      include: {
+        batch: {
+          include: {
+            batchHits: {
+              include: {
+                hit: {
+                  select: {
+                    id: true,
+                    hitNumber: true,
+                    chemicalComposition: true,
+                  },
+                },
+              },
+            },
+          },
+        },
+        customer: true,
+        item: true,
+        tests: {
+          include: {
+            rule: {
+              include: {
+                test: {
+                  include: {
+                    category: true,
+                  },
+                },
+                defaultCriteria: true,
+                ruleDefinition: true,
+              },
+            },
+          },
+          orderBy: {
+            id: 'asc',
+          },
+        },
+      },
+    });
+
+    if (!qcTest) {
+      throw new NotFoundException('QC record not found');
+    }
+
+    const batchTests = await this.prisma.batchTest.findMany({
+      where: {
+        batchId: qcTest.batchId,
+      },
+      include: {
+        test: {
+          include: {
+            category: true,
+            parameters: {
+              include: {
+                defaultCriteria: true,
+                ruleDefinition: true,
+              },
+            },
+          },
+        },
+      },
+      orderBy: {
+        sequence: 'asc',
+      },
+    });
+
+    const categories = this.buildCategoriesForItem(batchTests, qcTest.item).map(
+      (category) => ({
+        ...category,
+        rules: category.rules.map((rule) => ({
+          ...rule,
+          results: qcTest.tests
+            .filter((test) => test.rule.id === rule.id)
+            .map((test) => ({
+              id: test.id,
+              observed: test.observed,
+              min: test.min,
+              max: test.max,
+              status: test.status,
+            })),
+        })),
+      }),
+    );
+
+    return {
+      id: qcTest.id,
+      status: qcTest.status,
+      createdAt: qcTest.createdAt,
+      batch: {
+        id: qcTest.batch.id,
+        batchNumber: qcTest.batch.batchNumber,
+        grade: qcTest.batch.grade,
+        gradeId: qcTest.batch.gradeId,
+        condition: qcTest.batch.condition,
+      },
+      customer: {
+        id: qcTest.customer.id,
+        name: qcTest.customer.name,
+      },
+      item: {
+        id: qcTest.item.id,
+        od: qcTest.item.od,
+        wt: qcTest.item.wt,
+        qty: qcTest.item.qty,
+        condition: qcTest.item.condition,
+        length: qcTest.item.length,
+      },
+      categories,
+      tests: qcTest.tests.map((test) => ({
+        id: test.id,
+        observed: test.observed,
+        min: test.min,
+        max: test.max,
+        status: test.status,
+        rule: {
+          id: test.rule.id,
+          name: test.rule.name,
+          unit: test.rule.unit,
+          categoryName: test.rule.test.category.name,
+          ruleDefinition: test.rule.ruleDefinition,
+          defaultCriteria: test.rule.defaultCriteria,
+        },
+      })),
+      chemicalComposition:
+        qcTest.batch.batchHits.find((entry) => entry.hit?.chemicalComposition)?.hit
+          .chemicalComposition ?? null,
+    };
+  }
+
+  async getCustomerTcData(user: JwtUser, batchId: string, customerId: string): Promise<CustomerTcData> {
+    const batch = await this.prisma.batch.findFirst({
+      where: {
+        id: batchId,
+        ...this.getCompanyScope(user),
+      },
+      include: {
+        batchHits: {
+          include: {
+            hit: {
+              select: {
+                id: true,
+                chemicalComposition: true,
+              },
+            },
+          },
+        },
+      },
+    });
+
+    if (!batch) {
+      throw new NotFoundException('Batch not found');
+    }
+
+    const customer = await this.prisma.batchCustomer.findFirst({
+      where: {
+        id: customerId,
+        batchId,
+      },
+      include: {
+        items: {
+          include: {
+            qcTests: {
+              include: {
+                tests: {
+                  include: {
+                    rule: {
+                      include: {
+                        test: {
+                          include: {
+                            category: true,
+                          },
+                        },
+                        defaultCriteria: true,
+                        ruleDefinition: true,
+                      },
+                    },
+                  },
+                },
+              },
+              orderBy: {
+                createdAt: 'desc',
+              },
+            },
+          },
+        },
+      },
+    });
+
+    if (!customer) {
+      throw new NotFoundException('Customer not found for this batch');
+    }
+
+    const batchTests = await this.prisma.batchTest.findMany({
+      where: { batchId },
+      include: {
+        test: {
+          include: {
+            category: true,
+            parameters: {
+              include: {
+                defaultCriteria: true,
+                ruleDefinition: true,
+              },
+            },
+          },
+        },
+      },
+      orderBy: {
+        sequence: 'asc',
+      },
+    });
+
+    const items = customer.items
+      .map((item) => {
+        const latestQc = item.qcTests[0];
+        if (!latestQc) {
+          return null;
+        }
+
+        const categories = this.buildCategoriesForItem(batchTests, item).map((category) => ({
+          ...category,
+          rules: category.rules.map((rule) => ({
+            ...rule,
+            results: latestQc.tests
+              .filter((test) => test.rule.id === rule.id)
+              .map((test) => ({
+                id: test.id,
+                observed: test.observed,
+                min: test.min,
+                max: test.max,
+                status: test.status,
+              })),
+          })),
+        }));
+
+        const itemStatus = latestQc.tests.some((test) => test.status === 'FAIL')
+          ? 'FAIL'
+          : 'PASS';
+
+        return {
+          id: item.id,
+          od: item.od,
+          wt: item.wt,
+          qty: item.qty,
+          condition: item.condition,
+          length: item.length,
+          status: itemStatus,
+          categories,
+        };
+      })
+      .filter((item): item is NonNullable<typeof item> => item !== null);
+
+    if (items.length === 0) {
+      throw new NotFoundException('No QC records available for this customer in selected batch');
+    }
+
+    return {
+      batch: {
+        id: batch.id,
+        batchNumber: batch.batchNumber,
+        grade: batch.grade,
+        gradeId: batch.gradeId,
+        condition: batch.condition,
+      },
+      customer: {
+        id: customer.id,
+        name: customer.name,
+      },
+      items,
+      chemicalComposition:
+        batch.batchHits.find((entry) => entry.hit?.chemicalComposition)?.hit
+          .chemicalComposition ?? null,
+    };
+  }
+
   private getCompanyScope(user: JwtUser): Record<string, string> {
     if (user.role === UserRole.PLATFORM_ADMIN) {
       return {};
@@ -477,6 +839,22 @@ export class QcTestsService {
     }
 
     return { companyId: user.companyId };
+  }
+
+  private getQcRecordScope(user: JwtUser) {
+    if (user.role === UserRole.PLATFORM_ADMIN) {
+      return {};
+    }
+
+    if (!user.companyId) {
+      throw new ForbiddenException('User is not mapped to a company');
+    }
+
+    return {
+      batch: {
+        companyId: user.companyId,
+      },
+    };
   }
 
   private async getApplicableRulesForItem(
