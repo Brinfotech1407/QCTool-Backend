@@ -12,12 +12,22 @@ export class TestCategoryService {
     });
   }
 
-  findByStandard(standardId: string) {
+  findByStandard(standardId?: string) {
     return this.prisma.testCategory.findMany({
-      where: { standardId },
+      where: standardId ? { standardId } : undefined,
+      orderBy: {
+        sequence: 'asc',
+      },
       include: {
         tests: true,
       },
+    });
+  }
+
+  updateSequence(id: string, sequence: number) {
+    return this.prisma.testCategory.update({
+      where: { id },
+      data: { sequence },
     });
   }
 

@@ -1,0 +1,2 @@
+ALTER TABLE "TestCategory"
+ADD COLUMN "sequence" INTEGER NOT NULL DEFAULT 0;

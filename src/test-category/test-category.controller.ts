@@ -2,6 +2,7 @@ import {
   Body,
   Controller,
   Get,
+  Patch,
   Post,
   Query,
   Put,
@@ -11,6 +12,7 @@ import {
 } from '@nestjs/common';
 import { TestCategoryService } from './test-category.service';
 import { CreateCategoryDto } from './dto/create-category.dto';
+import { UpdateCategorySequenceDto } from './dto/update-category-sequence.dto';
 import { Roles } from '../auth/roles.decorator';
 import { UserRole } from '@prisma/client';
 import { JwtAuthGuard } from '../auth/jwt.guard';
@@ -36,6 +38,15 @@ export class TestCategoryController {
   @Get()
   findByStandard(@Query('standardId') standardId: string) {
     return this.service.findByStandard(standardId);
+  }
+
+  @Roles(UserRole.PLATFORM_ADMIN, UserRole.COMPANY_ADMIN)
+  @Patch(':id')
+  updateSequence(
+    @Param('id') id: string,
+    @Body() dto: UpdateCategorySequenceDto,
+  ) {
+    return this.service.updateSequence(id, dto.sequence);
   }
 
   @Roles(UserRole.PLATFORM_ADMIN)

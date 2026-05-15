@@ -209,6 +209,7 @@ model Standard {
 model TestCategory {
   id   String @id @default(uuid())
   name String
+  sequence Int @default(0)
 
   standardId String
   standard   Standard @relation(fields: [standardId], references: [id])

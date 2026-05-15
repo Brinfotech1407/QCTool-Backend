@@ -895,7 +895,7 @@ export class QcTestsService {
       if (!categoryMap.has(categoryName)) {
         categoryMap.set(categoryName, {
           name: categoryName,
-          sequence: batchTest.sequence,
+          sequence: batchTest.test?.category?.sequence ?? batchTest.sequence,
           rules: [],
         });
       }
@@ -923,19 +923,34 @@ export class QcTestsService {
       categoryMap.get(rule.categoryName)?.rules.push(rule);
     });
 
-    return [...categoryMap.values()].sort((left, right) => left.sequence - right.sequence);
+    return [...categoryMap.values()]
+      .map((category) => ({
+        ...category,
+        rules: [...category.rules].sort(
+          (left: any, right: any) =>
+            Number(left.sequence ?? 0) - Number(right.sequence ?? 0),
+        ),
+      }))
+      .sort((left, right) => left.sequence - right.sequence);
   }
 
   private buildApplicableRules(batchTests: Array<any>, item: { od: number; wt: number; length: number; condition: string }) {
     return batchTests.flatMap((batchTest) =>
       (batchTest.test?.parameters ?? [])
-        .map((parameter: any) =>
-          this.toContextRule(parameter, batchTest.sequence, batchTest.test?.category?.name ?? 'General', item),
+        .map((parameter: any, parameterIndex: number) =>
+          this.toContextRule(
+            parameter,
+            batchTest.test?.category?.sequence ?? batchTest.sequence,
+            batchTest.test?.category?.name ?? 'General',
+            item,
+            parameterIndex + 1,
+          ),
         )
         .filter(Boolean),
     ) as Array<{
       id: string;
       name: string;
+      sequence: number;
       type: string;
       validationType: string;
       spec: { min: number | null; max: number | null; expectedValue: string | number | null };
@@ -946,7 +961,13 @@ export class QcTestsService {
     }>;
   }
 
-  private toContextRule(parameter: any, sequence: number, categoryName: string, item: { od: number; wt: number; length: number; condition: string }) {
+  private toContextRule(
+    parameter: any,
+    categorySequence: number,
+    categoryName: string,
+    item: { od: number; wt: number; length: number; condition: string },
+    ruleSequence: number,
+  ) {
     if (!this.isApplicableToItem(parameter, item)) {
       return null;
     }
@@ -959,6 +980,7 @@ export class QcTestsService {
 
     return {
       id: parameter.id,
+      sequence: ruleSequence,
       name: parameter.name,
       type,
       validationType,
@@ -969,7 +991,7 @@ export class QcTestsService {
       spec,
       options,
       categoryName,
-      categorySequence: sequence,
+      categorySequence,
       contextLabel: this.getContextLabel(parameter, item),
       parameter,
     };

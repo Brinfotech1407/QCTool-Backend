@@ -1,4 +1,4 @@
-import { IsNotEmpty, IsString } from 'class-validator';
+import { IsInt, IsNotEmpty, IsOptional, IsString, Min } from 'class-validator';
 
 export class CreateCategoryDto {
   @IsString()
@@ -8,4 +8,9 @@ export class CreateCategoryDto {
   @IsString()
   @IsNotEmpty()
   standardId: string;
+
+  @IsOptional()
+  @IsInt()
+  @Min(0)
+  sequence?: number;
 }
