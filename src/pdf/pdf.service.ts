@@ -3,11 +3,10 @@ import type { Response } from 'express';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 
-// pdfkit does not ship ESM-friendly typings in this setup; require keeps the Nest build simple.
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 const PDFDocument = require('pdfkit');
 
-type PdfQcRuleRow = {
+type RuleRow = {
   name: string;
   observed: string | number;
   spec: string;
@@ -32,8 +31,8 @@ type PdfQcData = {
   };
   categories: Array<{
     name: string;
-      rules: Array<Record<string, any>>;
-    }>;
+    rules: Array<Record<string, any>>;
+  }>;
   chemicalComposition?: unknown;
 };
 
@@ -62,383 +61,532 @@ type PdfCustomerTcData = {
 
 @Injectable()
 export class PdfService {
-  private readonly pageWidth = 515;
-  private readonly left = 40;
-  private readonly right = 555;
+  private readonly margin = 20;
+  private readonly pageWidth = 595.28;
+  private readonly contentWidth = this.pageWidth - this.margin * 2;
+  private readonly yellow = '#FFF200';
+  private readonly border = '#000000';
   private readonly logoPath = path.join(process.cwd(), 'src', 'assets', 'logo.png');
+  private readonly isoLogoPath = path.join(process.cwd(), 'src', 'assets', 'iso.png');
+  private readonly rohsLogoPath = path.join(process.cwd(), 'src', 'assets', 'rohs.png');
 
   generateQCReport(res: Response, qcData: PdfQcData) {
-    const doc = new PDFDocument({ margin: 40, size: 'A4', bufferPages: true });
-
+    const doc = new PDFDocument({ margin: this.margin, size: 'A4' });
     res.setHeader('Content-Type', 'application/pdf');
     res.setHeader(
       'Content-Disposition',
       `attachment; filename=QC-${qcData.batch.batchNumber}.pdf`,
     );
-
     doc.pipe(res);
 
-    this.writeHeader(doc, qcData);
-    this.writeCompanyBlock(doc, qcData);
-    this.writeBatchInfoBox(doc, qcData);
-    this.writeChemical(doc, qcData.chemicalComposition);
-    this.writeCustomerItemSection(doc, qcData);
-   // this.writeFinalResult(doc, qcData.status);
-    this.drawSignatureBlock(doc);
-    this.addFooters(doc);
+    this.renderCertificateHeader(doc, qcData.batch.batchNumber, qcData.customer.name, qcData);
+    this.renderChemicalSection(doc, qcData.chemicalComposition);
+    this.renderDimensionalSection(doc, qcData.batch.batchNumber, [qcData.item], qcData.categories);
+    this.renderMechanicalSection(doc, qcData.categories);
+    this.renderRoundnessSection(doc, qcData.categories);
+    this.renderStraightnessSection(doc, [qcData.item]);
+    this.renderVisualSection(doc, qcData.categories);
+    this.renderRemarks(doc, qcData.status);
+    this.renderSignatureSection(doc);
 
     doc.end();
   }
 
   generateCustomerQCReport(res: Response, tcData: PdfCustomerTcData) {
-    const doc = new PDFDocument({ margin: 40, size: 'A4', bufferPages: true });
-    const overallStatus = tcData.items.some((item) => item.status === 'FAIL')
-      ? 'FAIL'
-      : 'PASS';
-
+    const doc = new PDFDocument({ margin: this.margin, size: 'A4' });
     res.setHeader('Content-Type', 'application/pdf');
     res.setHeader(
       'Content-Disposition',
       `attachment; filename=QC-${tcData.batch.batchNumber}-${tcData.customer.name}.pdf`,
     );
-
     doc.pipe(res);
 
-    this.writeHeader(doc, {
-      status: overallStatus,
-      batch: tcData.batch,
-      customer: tcData.customer,
-      item: { od: 0, wt: 0 },
-      categories: [],
-    });
-    this.writeCompanyBlock(doc, {
-      status: overallStatus,
-      batch: tcData.batch,
-      customer: tcData.customer,
-      item: { od: 0, wt: 0 },
-      categories: [],
-    });
-    this.writeBatchInfoBox(doc, {
-      status: overallStatus,
-      batch: tcData.batch,
-      customer: tcData.customer,
-      item: { od: 0, wt: 0 },
-      categories: [],
-    });
-    this.writeChemical(doc, tcData.chemicalComposition);
-    this.writeCustomerMultiItemSection(doc, tcData);
-    this.drawSignatureBlock(doc);
-    this.addFooters(doc);
+    this.renderCertificateHeader(doc, tcData.batch.batchNumber, tcData.customer.name, tcData);
+    this.renderChemicalSection(doc, tcData.chemicalComposition);
+    this.renderDimensionalSection(doc, tcData.batch.batchNumber, tcData.items, tcData.items[0]?.categories ?? []);
+    this.renderMechanicalSection(
+      doc,
+      tcData.items.flatMap((item) => item.categories),
+    );
+    this.renderRoundnessSection(
+      doc,
+      tcData.items.flatMap((item) => item.categories),
+    );
+    this.renderStraightnessSection(doc, tcData.items);
+    this.renderVisualSection(
+      doc,
+      tcData.items.flatMap((item) => item.categories),
+    );
+    const overallStatus = tcData.items.some((item) => item.status === 'FAIL') ? 'FAIL' : 'PASS';
+    this.renderRemarks(doc, overallStatus);
+    this.renderSignatureSection(doc);
+
     doc.end();
   }
 
-  private writeHeader(doc: InstanceType<typeof PDFDocument>, qcData: PdfQcData) {
-    const startY = 40;
+  private renderCertificateHeader(doc: InstanceType<typeof PDFDocument>, tcNo: string, customer: string, data: any) {
+    const y = doc.y;
+    const leftW = 90;
+    const centerW = this.contentWidth - 180;
+    const rightW = 90;
 
+    this.drawCell(doc, this.margin, y, leftW, 45, '');
     if (fs.existsSync(this.logoPath)) {
-      doc.image(this.logoPath, this.left, startY, { width: 60 });
+      doc.image(this.logoPath, this.margin + 8, y + 6, { width: 72, height: 32, fit: [72, 32] });
     }
 
-    doc
-      .fontSize(16)
-      .fillColor('#111827')
-      .text('TEST CERTIFICATE', 0, startY + 10, {
-        align: 'center',
-      });
+    this.drawCell(doc, this.margin + leftW, y, centerW, 45, '');
+    doc.fontSize(10).font('Helvetica-Bold').text('Hindalco Industries Ltd', this.margin + leftW, y + 6, { width: centerW, align: 'center' });
+    doc.fontSize(7).font('Helvetica').text('Copper Division, Industrial Area, Gujarat, India', this.margin + leftW, y + 20, { width: centerW, align: 'center' });
+    doc.fontSize(7).text('www.hindalco.com', this.margin + leftW, y + 31, { width: centerW, align: 'center' });
 
-    doc
-      .fontSize(8)
-      .fillColor('#111827')
-      .text(`Doc No: QC-001`, 400, startY)
-      .text(`Rev No: 00`, 400, startY + 10)
-      .text(`Date: ${new Date().toLocaleDateString()}`, 400, startY + 20);
+    this.drawCell(doc, this.margin + leftW + centerW, y, rightW, 45, '');
+    if (fs.existsSync(this.isoLogoPath)) {
+      doc.image(this.isoLogoPath, this.margin + leftW + centerW + 6, y + 5, { width: 34, height: 14, fit: [34, 14] });
+    } else {
+      this.drawCell(doc, this.margin + leftW + centerW + 6, y + 6, 34, 12, 'ISO', { align: 'center', fontSize: 7 });
+    }
+    if (fs.existsSync(this.rohsLogoPath)) {
+      doc.image(this.rohsLogoPath, this.margin + leftW + centerW + 46, y + 5, { width: 34, height: 14, fit: [34, 14] });
+    } else {
+      this.drawCell(doc, this.margin + leftW + centerW + 46, y + 6, 34, 12, 'ROHS', { align: 'center', fontSize: 7 });
+    }
 
-    doc.y = startY + 58;
+    doc.y = y + 45;
+    this.drawSectionHeader(doc, 'MILL TEST CERTIFICATE');
+
+    const metaY = doc.y;
+    const cols = [108, this.contentWidth - 108];
+    this.drawRow(doc, metaY, ['TC NO', `:QC-${tcNo}                                                          Date: ${new Date().toLocaleDateString()}`], cols, { fontSize: 6.4 });
+    this.drawRow(doc, metaY + 14, ['M/s.', `:${customer}`], cols, { fontSize: 6.4 });
+    this.drawRow(doc, metaY + 28, ['P. O. NO. / INVOICE NO', ':N.A'], cols, { fontSize: 6.4 });
+    this.drawRow(doc, metaY + 42, ['PRODUCT', ':WROUGHT COPPER TUBES FOR REFRIGERATION AND AIR CONDITIONING PURPOSES'], cols, { fontSize: 6.1 });
+    this.drawRow(doc, metaY + 56, ['SPECIFICATION', ':SPECIFICATION AS PER IS 10773:2025'], cols, { fontSize: 6.1 });
+    doc.y = metaY + 72;
   }
 
-  private writeCompanyBlock(doc: InstanceType<typeof PDFDocument>, qcData: PdfQcData) {
-    doc
-      .fontSize(10)
-      .fillColor('#111827')
-      .text('Company Name: Hindalco Industries Ltd')
-      .text('Plant: Copper Division')
-      .text(`Certificate No: QC-${qcData.batch.batchNumber}`)
-      .text(`Date: ${new Date().toLocaleDateString()}`);
-
-    doc.moveDown();
-  }
-
-  private writeBatchInfoBox(doc: InstanceType<typeof PDFDocument>, qcData: PdfQcData) {
-    const boxTop = doc.y;
-    const boxHeight = 50;
-
-    doc.rect(40, boxTop, this.pageWidth, boxHeight).stroke('#111827');
-    doc
-      .fontSize(9)
-      .fillColor('#111827')
-      .text(`Batch No: ${qcData.batch.batchNumber}`, 50, boxTop + 8)
-      .text(`Grade: ${qcData.batch.grade || qcData.batch.gradeId || '-'}`, 50, boxTop + 24)
-      .text(`Customer: ${qcData.customer.name}`, 275, boxTop + 8)
-      .text(`Status: ${qcData.status}`, 275, boxTop + 24);
-
-    doc.y = boxTop + boxHeight + 10;
-    doc.moveTo(this.left, doc.y).lineTo(this.right, doc.y).stroke('#111827');
-    doc.moveDown();
-  }
-
-  private writeChemical(doc: InstanceType<typeof PDFDocument>, chemicalComposition: unknown) {
-    doc.fontSize(12).fillColor('#111827').text('Chemical Composition');
-    doc.moveDown(0.5);
+  private renderChemicalSection(doc: InstanceType<typeof PDFDocument>, chemicalComposition: unknown) {
+    this.ensurePageSpace(doc, 80, () => this.drawSectionHeader(doc, 'CHEMICAL COMPOSITION (%)'));
+    this.drawSectionHeader(doc, 'CHEMICAL COMPOSITION (%)');
+    const startY = doc.y;
+    const cols = [24, 100, 70, 60, 70, 70, this.contentWidth - 394];
+    this.drawRow(
+      doc,
+      startY,
+      ['REQUIRED - AS PER IS 10773:2025', '', '', '', 'OBSERVED CHEMICAL ANALYSIS', 'BATCH NO.', ''],
+      cols,
+      { fontSize: 6, bold: true },
+    );
+    this.drawRow(doc, startY + 14, ['SR NO.', 'ELEMENTS', 'MINI.%', 'MAX.%', '(Batch No)', '(Batch No)', ''], cols, {
+      fontSize: 6.5,
+      bold: true,
+    });
 
     const entries = this.getChemicalEntries(chemicalComposition);
-    if (entries.length === 0) {
-      doc.fontSize(10).text('No chemical composition linked.');
-      doc.moveDown();
-      return;
-    }
+    const rows = entries.length
+      ? entries
+      : [{ element: '-', value: '-', min: '-', max: '-' }];
 
-    let y = doc.y;
-    this.drawRow(doc, y, ['Element', 'Observed'], [250, 250], true);
-    y += 20;
-
-    entries.forEach((entry) => {
-      this.checkPageSpace(doc, y, 24);
-      if (y + 24 > doc.page.height - 40) {
-        doc.addPage();
-        y = 40;
-        this.drawRow(doc, y, ['Element', 'Observed'], [250, 250], true);
-        y += 20;
-      }
-      this.drawRow(doc, y, [entry.element, entry.value], [250, 250]);
-      y += 20;
-    });
-
-    doc.y = y + 14;
-  }
-
-  private writeCustomerItemSection(
-    doc: InstanceType<typeof PDFDocument>,
-    qcData: PdfQcData,
-  ) {
-    doc.addPage();
-    doc.fontSize(12).fillColor('#111827').text(`Customer: ${qcData.customer.name}`);
-    doc.moveDown();
-
-    const itemBoxTop = doc.y;
-    const itemBoxHeight = 38;
-    doc.rect(40, itemBoxTop, this.pageWidth, itemBoxHeight).stroke('#111827');
-    doc
-      .fontSize(9)
-      .fillColor('#111827')
-      .text(`OD: ${qcData.item.od}`, 50, itemBoxTop + 8)
-      .text(`WT: ${qcData.item.wt}`, 150, itemBoxTop + 8)
-      .text(`Length: ${qcData.item.length ?? '-'}`, 250, itemBoxTop + 8)
-      .text(`Condition: ${qcData.item.condition ?? '-'}`, 360, itemBoxTop + 8);
-
-    doc.y = itemBoxTop + itemBoxHeight + 16;
-
-    qcData.categories.forEach((category) => {
-      this.checkPageSpace(doc, doc.y, 50);
-      doc.fontSize(11).fillColor('#111827').text(category.name, { underline: true });
-      doc.moveDown(0.5);
-
-      let y = doc.y;
+    rows.forEach((entry, index) => {
+      const rowY = startY + 28 + index * 14;
+      this.ensurePageSpace(doc, 20, () => {
+        this.drawSectionHeader(doc, 'CHEMICAL COMPOSITION (%)');
+        this.drawRow(doc, doc.y, ['REQUIRED - AS PER IS 10773:2025', '', '', '', 'OBSERVED CHEMICAL ANALYSIS', '', ''], cols, {
+          fontSize: 6,
+          bold: true,
+        });
+        this.drawRow(doc, doc.y + 14, ['SR NO.', 'ELEMENTS', 'MINI.%', 'MAX.%', '(Batch No)', '(Batch No)', ''], cols, {
+          fontSize: 6.5,
+          bold: true,
+        });
+      });
       this.drawRow(
         doc,
-        y,
-        ['Test', 'Specification', 'Observed', 'Result'],
-        [170, 170, 85, 90],
-        true,
+        rowY,
+        [String(index + 1), entry.element, entry.min, entry.max, entry.value, entry.value, ''],
+        cols,
+        { fontSize: 6.5 },
       );
-      y += 20;
-
-      category.rules
-        .flatMap((rule) => this.expandRuleRows(rule))
-        .forEach((row) => {
-          this.checkPageSpace(doc, y, 24);
-          if (y + 24 > doc.page.height - 40) {
-            doc.addPage();
-            y = 40;
-            doc.fontSize(11).fillColor('#111827').text(category.name, 40, y, {
-              underline: true,
-            });
-            y = doc.y + 8;
-            this.drawRow(
-              doc,
-              y,
-              ['Test', 'Specification', 'Observed', 'Result'],
-              [170, 170, 85, 90],
-              true,
-            );
-            y += 20;
-          }
-          this.drawRow(
-            doc,
-            y,
-            [row.name, row.spec, String(row.observed), row.status],
-            [170, 170, 85, 90],
-            false,
-            [undefined, undefined, undefined, row.status === 'FAIL' ? 'red' : '#111827'],
-          );
-          y += 20;
-        });
-
-      doc.y = y + 14;
     });
+
+    doc.y = startY + 28 + rows.length * 14 + 4;
   }
 
-  private writeCustomerMultiItemSection(
+  private renderDimensionalSection(
     doc: InstanceType<typeof PDFDocument>,
-    tcData: PdfCustomerTcData,
+    batchNo: string,
+    items: Array<{ od: number; wt: number; qty?: number; length?: number }>,
+    categories: Array<{ name: string; rules: Array<Record<string, any>> }>,
   ) {
-    doc.addPage();
-    doc.fontSize(12).fillColor('#111827').text(`Customer: ${tcData.customer.name}`);
-    doc.moveDown();
+    this.ensurePageSpace(doc, 80, () => this.drawSectionHeader(doc, 'DIMENSIONAL MEASUREMENTS'));
+    this.drawSectionHeader(doc, 'DIMENSIONAL MEASUREMENTS');
+    const y = doc.y;
+    const cols = [20, 52, 62, 50, 50, 62, 50, 50, 72, 47];
+    this.drawRow(
+      doc,
+      y,
+      ['SR', 'SIZE MM', 'OUTSIDE DIAMETER (OD) MM', '', '', 'WALL THICKNESS (WT) MM', '', '', 'BATCH NO', 'QTY'],
+      cols,
+      { fontSize: 6.1, bold: true },
+    );
+    this.drawRow(
+      doc,
+      y + 14,
+      ['', '', 'Tolerance', 'Min', 'Max', 'Tolerance', 'Min', 'Max', '', '(KGS)'],
+      cols,
+      { fontSize: 6.2, bold: true },
+    );
 
-    tcData.items.forEach((item, index) => {
-      this.checkPageSpace(doc, doc.y, 80);
-
-      doc
-        .fontSize(10)
-        .fillColor('#111827')
-        .text(`Item ${index + 1}`, { underline: true });
-      doc.moveDown(0.3);
-
-      const itemBoxTop = doc.y;
-      const itemBoxHeight = 38;
-      doc.rect(40, itemBoxTop, this.pageWidth, itemBoxHeight).stroke('#111827');
-      doc
-        .fontSize(9)
-        .fillColor('#111827')
-        .text(`OD: ${item.od}`, 50, itemBoxTop + 8)
-        .text(`WT: ${item.wt}`, 150, itemBoxTop + 8)
-        .text(`Length: ${item.length ?? '-'}`, 250, itemBoxTop + 8)
-        .text(`Condition: ${item.condition ?? '-'}`, 360, itemBoxTop + 8);
-
-      doc.y = itemBoxTop + itemBoxHeight + 12;
-
-      item.categories.forEach((category) => {
-        this.checkPageSpace(doc, doc.y, 50);
-        doc.fontSize(11).fillColor('#111827').text(category.name, { underline: true });
-        doc.moveDown(0.5);
-
-        let y = doc.y;
+    const dimRules = this.extractDimensionalRules(categories);
+    items.forEach((item, index) => {
+      const spec = dimRules[index] ?? dimRules[0];
+      const rowY = y + 28 + index * 28;
+      this.ensurePageSpace(doc, 34, () => {
+        this.drawSectionHeader(doc, 'DIMENSIONAL MEASUREMENTS');
         this.drawRow(
           doc,
-          y,
-          ['Test', 'Specification', 'Observed', 'Result'],
-          [170, 170, 85, 90],
-          true,
+          doc.y,
+          ['SR', 'SIZE MM', 'OUTSIDE DIAMETER (OD) MM', '', '', 'WALL THICKNESS (WT) MM', '', '', 'BATCH NO', 'QTY'],
+          cols,
+          { fontSize: 6.1, bold: true },
         );
-        y += 20;
-
-        category.rules
-          .flatMap((rule) => this.expandRuleRows(rule))
-          .forEach((row) => {
-            this.checkPageSpace(doc, y, 24);
-            if (y + 24 > doc.page.height - 40) {
-              doc.addPage();
-              y = 40;
-              this.drawRow(
-                doc,
-                y,
-                ['Test', 'Specification', 'Observed', 'Result'],
-                [170, 170, 85, 90],
-                true,
-              );
-              y += 20;
-            }
-            this.drawRow(
-              doc,
-              y,
-              [row.name, row.spec, String(row.observed), row.status],
-              [170, 170, 85, 90],
-              false,
-              [undefined, undefined, undefined, row.status === 'FAIL' ? 'red' : '#111827'],
-            );
-            y += 20;
-          });
-
-        doc.y = y + 10;
+        this.drawRow(
+          doc,
+          doc.y + 14,
+          ['', '', 'Tolerance', 'Min', 'Max', 'Tolerance', 'Min', 'Max', '', '(KGS)'],
+          cols,
+          { fontSize: 6.2, bold: true },
+        );
       });
-
-      doc.moveDown(0.5);
+      this.drawRow(
+        doc,
+        rowY,
+        [
+          String(index + 1),
+          `${item.od} x ${item.wt}`,
+          spec.odTolerance,
+          spec.odMin,
+          spec.odMax,
+          spec.wtTolerance,
+          spec.wtMin,
+          spec.wtMax,
+          batchNo.slice(0, 14),
+          String(item.qty ?? '-'),
+        ],
+        cols,
+        { fontSize: 6.2 },
+      );
+      this.drawRow(
+        doc,
+        rowY + 14,
+        ['', 'Observed', String(item.od), '', '', String(item.wt), '', '', '', ''],
+        cols,
+        { fontSize: 6.2 },
+      );
     });
+
+    doc.y = y + 28 + items.length * 28 + 4;
   }
 
-  private writeFinalResult(doc: InstanceType<typeof PDFDocument>, status: string) {
-    doc.addPage();
-    doc
-      .fontSize(14)
-      .fillColor(status === 'FAIL' ? 'red' : 'green')
-      .text(`FINAL RESULT: ${status}`, { align: 'center' });
-    doc.fillColor('#111827');
-  }
+  private renderMechanicalSection(doc: InstanceType<typeof PDFDocument>, categories: Array<{ name: string; rules: Array<Record<string, any>> }>) {
+    this.ensurePageSpace(doc, 90, () => this.drawSectionHeader(doc, 'MECHANICAL & METALLURGICAL PROPERTIES'));
+    this.drawSectionHeader(doc, 'MECHANICAL & METALLURGICAL PROPERTIES');
+    const startY = doc.y;
+    const cols = [20, 92, 70, 50, 70, 50, 70, this.contentWidth - 422];
+    this.drawRow(doc, startY, ['TEMPER', '', 'LIGHT ANNEALED', '', 'SOFT ANNEALED', '', '', 'Remarks'], cols, {
+      bold: true,
+      fontSize: 6,
+    });
+    this.drawRow(doc, startY + 14, ['SR. NO', 'PROPERTIES', 'REQUIRED', 'OBSERVED', 'REQUIRED', 'OBSERVED', '', ''], cols, {
+      bold: true,
+      fontSize: 6,
+    });
 
-  private drawSignatureBlock(doc: InstanceType<typeof PDFDocument>) {
-    doc.addPage();
-
-    let y = doc.y + 100;
-    const boxWidth = 150;
-    const gap = 20;
-    const labels = ['Tested By', 'Checked By', 'Authorized Signatory'];
-
-    labels.forEach((label, index) => {
-      const x = this.left + index * (boxWidth + gap);
-      doc.rect(x, y, boxWidth, 60).stroke('#111827');
-      doc
-        .fontSize(9)
-        .fillColor('#111827')
-        .text(label, x, y + 68, {
-          width: boxWidth,
-          align: 'center',
+    const rows = this.extractMechanicalRows(categories);
+    rows.forEach((row, index) => {
+      const rowY = startY + 28 + index * 12;
+      this.ensurePageSpace(doc, 20, () => {
+        this.drawSectionHeader(doc, 'MECHANICAL & METALLURGICAL PROPERTIES');
+        this.drawRow(doc, doc.y, ['TEMPER', '', 'LIGHT ANNEALED', '', 'SOFT ANNEALED', '', '', 'Remarks'], cols, {
+          bold: true,
+          fontSize: 6,
         });
+        this.drawRow(doc, doc.y + 14, ['SR. NO', 'PROPERTIES', 'REQUIRED', 'OBSERVED', 'REQUIRED', 'OBSERVED', '', ''], cols, {
+          bold: true,
+          fontSize: 6,
+        });
+      });
+      this.drawRow(doc, rowY, [String(index + 1), row.property, row.required, row.observed, row.required, row.observed, '', row.result], cols, {
+        fontSize: 6.2,
+      });
     });
 
-    doc
-      .rect(400, y + 100, 120, 80)
-      .dash(3, { space: 3 })
-      .stroke('#111827');
+    doc.y = startY + 28 + rows.length * 12 + 3;
+  }
 
+  private renderRoundnessSection(doc: InstanceType<typeof PDFDocument>, categories: Array<{ name: string; rules: Array<Record<string, any>> }>) {
+    this.ensurePageSpace(doc, 60, () => this.drawSectionHeader(doc, 'ROUNDNESS'));
+    this.drawSectionHeader(doc, 'ROUNDNESS');
+    const y = doc.y;
+    const rule = this.findRule(categories, 'round');
+    const row = rule
+      ? this.expandRuleRows(rule)[0]
+      : { spec: '-', observed: '-', status: '-' };
+    const cols = [26, 140, 120, 100, this.contentWidth - 386];
+    this.drawRow(doc, y, ['1', 't/D based tolerance formula', row.spec, String(row.observed), `Result ${row.status}`], cols, {
+      bold: true,
+      fontSize: 6.2,
+    });
+    doc.y = y + 18;
+  }
+
+  private renderStraightnessSection(
+    doc: InstanceType<typeof PDFDocument>,
+    items: Array<{ length?: number; condition?: string }>,
+  ) {
+    this.ensurePageSpace(doc, 55, () => this.drawSectionHeader(doc, 'STRAIGHTNESS & LENGTH'));
+    this.drawSectionHeader(doc, 'STRAIGHTNESS & LENGTH');
+    const y = doc.y;
+    const cols = [40, 200, this.contentWidth - 240];
+    this.drawRow(doc, y, ['1', 'Length', 'N.A'], cols, { fontSize: 6.5 });
+    this.drawRow(doc, y + 14, ['2', 'Straightness', 'N.A'], cols, { fontSize: 6.5 });
+    doc.y = y + 32;
+  }
+
+  private renderVisualSection(doc: InstanceType<typeof PDFDocument>, categories: Array<{ name: string; rules: Array<Record<string, any>> }>) {
+    this.ensurePageSpace(doc, 80, () => this.drawSectionHeader(doc, 'VISUAL INSPECTION'));
+    this.drawSectionHeader(doc, 'VISUAL INSPECTION');
+    const y = doc.y;
+    const cols = [30, 180, 170, this.contentWidth - 380];
+    this.drawRow(doc, y, ['SR', 'TEST', 'REQUIRED', 'OBSERVED'], cols, { bold: true, fontSize: 6.5 });
+    const allRows = this.extractVisualRows(categories);
+    const rowHeight = 18;
+    const reserveBottom = 190; // keep space for remarks + signatures on page 1
+    const availableHeight = 760 - reserveBottom - (y + 14);
+    const maxRows = Math.max(1, Math.floor(availableHeight / rowHeight));
+    const rows = allRows.slice(0, maxRows);
+    rows.forEach((row, index) => {
+      const rowY = y + 14 + index * rowHeight;
+      this.drawWrappedTextRow(
+        doc,
+        rowY,
+        [String(index + 1), row.test, row.required, row.observed],
+        cols,
+        rowHeight,
+      );
+    });
+    doc.y = y + 14 + rows.length * rowHeight + 2;
+  }
+
+  private renderRemarks(doc: InstanceType<typeof PDFDocument>, status: string) {
+    this.ensurePageSpace(doc, 64, () => this.drawSectionHeader(doc, 'REMARKS'));
+    this.drawSectionHeader(doc, 'REMARKS');
+    this.drawCell(
+      doc,
+      this.margin,
+      doc.y,
+      this.contentWidth,
+      18,
+      `WE CERTIFY THAT THE MATERIAL DESCRIBED ABOVE FULLY CONFORMS TO IS 10773:2025 STANDARDS. RESULT: ${status}.`,
+      { fontSize: 6.5 },
+    );
+    doc.y += 20;
+    this.drawCell(
+      doc,
+      this.margin,
+      doc.y,
+      this.contentWidth,
+      16,
+      'CHEMICAL COMPOSITION AND MECHANICAL PROPERTIES OF THE PRODUCT & DIMENSIONS TESTED AS PER IS 10773:2025 REQUIREMENTS.',
+      { fontSize: 6.1 },
+    );
+    doc.y += 20;
+    this.drawCell(
+      doc,
+      this.margin,
+      doc.y,
+      this.contentWidth,
+      14,
+      'For : HINDALCO INDUSTRIES LIMITED - WAGHODIA',
+      { fontSize: 6.5, bold: true },
+    );
+    doc.y += 16;
+  }
+
+  private renderSignatureSection(doc: InstanceType<typeof PDFDocument>) {
+    const y = Math.min(doc.y + 2, 730);
+    const boxW = 150;
+    const gap = 20;
+    this.drawCell(doc, this.margin, y, boxW, 34, '');
+    this.drawCell(doc, this.margin + boxW + gap, y, boxW, 34, '');
+    doc.circle(this.margin + boxW * 2 + gap * 2 + 60, y + 17, 17).stroke(this.border);
+    doc.fontSize(7).font('Helvetica').text('Quality Control In-charge', this.margin, y + 38, { width: boxW, align: 'center' });
+    doc.text('Authorized Signature', this.margin + boxW + gap, y + 38, { width: boxW, align: 'center' });
+    doc.text('Stamp', this.margin + boxW * 2 + gap * 2 + 40, y + 38, { width: 40, align: 'center' });
+    doc.y = y + 52;
+  }
+
+  private drawCell(
+    doc: InstanceType<typeof PDFDocument>,
+    x: number,
+    y: number,
+    w: number,
+    h: number,
+    text: string,
+    options?: { align?: 'left' | 'center' | 'right'; bold?: boolean; fontSize?: number; fill?: string },
+  ) {
+    if (options?.fill) {
+      doc.rect(x, y, w, h).fillAndStroke(options.fill, this.border);
+    } else {
+      doc.rect(x, y, w, h).stroke(this.border);
+    }
     doc
-      .undash()
-      .fontSize(8)
-      .fillColor('#111827')
-      .text('Company Stamp', 400, y + 185, {
-        width: 120,
-        align: 'center',
+      .font(options?.bold ? 'Helvetica-Bold' : 'Helvetica')
+      .fontSize(options?.fontSize ?? 7)
+      .fillColor('#000000')
+      .text(text, x + 2, y + 4, { width: w - 4, height: h - 4, align: options?.align ?? 'left' });
+  }
+
+  private drawRow(
+    doc: InstanceType<typeof PDFDocument>,
+    y: number,
+    cells: string[],
+    widths: number[],
+    options?: { bold?: boolean; fontSize?: number },
+  ) {
+    let x = this.margin;
+    cells.forEach((cell, index) => {
+      this.drawCell(doc, x, y, widths[index], 12, cell, {
+        bold: options?.bold,
+        fontSize: options?.fontSize ?? 7,
+        align: index === cells.length - 1 ? 'center' : 'left',
       });
+      x += widths[index];
+    });
+  }
+
+  private drawSectionHeader(doc: InstanceType<typeof PDFDocument>, title: string) {
+    this.drawCell(doc, this.margin, doc.y, this.contentWidth, 12, title, {
+      bold: true,
+      fontSize: 8,
+      fill: this.yellow,
+      align: 'left',
+    });
+    doc.y += 12;
+  }
+
+  private drawWrappedTextRow(
+    doc: InstanceType<typeof PDFDocument>,
+    y: number,
+    cells: string[],
+    widths: number[],
+    rowHeight: number,
+  ) {
+    let x = this.margin;
+    cells.forEach((cell, index) => {
+      this.drawCell(doc, x, y, widths[index], rowHeight, cell, {
+        fontSize: 6.5,
+        align: index === cells.length - 1 ? 'center' : 'left',
+      });
+      x += widths[index];
+    });
+  }
+
+  private ensurePageSpace(doc: InstanceType<typeof PDFDocument>, required: number, onBreak: () => void) {
+    if (doc.y + required > 760) {
+      doc.addPage();
+      doc.y = this.margin;
+      onBreak();
+    }
   }
 
   private getChemicalEntries(chemicalComposition: unknown) {
     if (!chemicalComposition || typeof chemicalComposition !== 'object') {
       return [];
     }
-
-    return Object.entries(chemicalComposition as Record<string, unknown>).map(
-      ([element, value]) => ({
-        element,
-        value:
-          value === null || value === undefined || value === ''
-            ? '-'
-            : String(value),
-      }),
-    );
+    return Object.entries(chemicalComposition as Record<string, unknown>).map(([element, value]) => ({
+      element,
+      value: value === null || value === undefined || value === '' ? '-' : String(value),
+      min: '-',
+      max: '-',
+    }));
   }
 
-  private expandRuleRows(rule: PdfQcData['categories'][number]['rules'][number]) {
+  private extractDimensionalRules(categories: Array<{ name: string; rules: Array<Record<string, any>> }>) {
+    const rows = categories.flatMap((category) => category.rules.map((rule) => this.expandRuleRows(rule))).flat();
+    const od = rows.find((row) => row.name.toLowerCase().includes('od'))?.spec ?? '-';
+    const wt = rows.find((row) => row.name.toLowerCase().includes('wt') || row.name.toLowerCase().includes('wall'))?.spec ?? '-';
+    const [odMin, odMax] = this.extractMinMax(od);
+    const [wtMin, wtMax] = this.extractMinMax(wt);
+    return [{
+      odTolerance: od,
+      odMin,
+      odMax,
+      wtTolerance: wt,
+      wtMin,
+      wtMax,
+    }];
+  }
+
+  private extractMechanicalRows(categories: Array<{ name: string; rules: Array<Record<string, any>> }>) {
+    const rows = categories.flatMap((category) => category.rules.map((rule) => this.expandRuleRows(rule))).flat();
+    const filtered = rows.filter((row) =>
+      /tensile|elongation|grain|anneal|temper|metallurgical/i.test(row.name),
+    );
+    if (!filtered.length) {
+      return [{ property: 'Tensile Strength', required: '-', observed: '-', result: '-' }];
+    }
+    return filtered.map((row) => ({
+      property: row.name,
+      required: row.spec,
+      observed: String(row.observed),
+      result: row.status,
+    }));
+  }
+
+  private extractVisualRows(categories: Array<{ name: string; rules: Array<Record<string, any>> }>) {
+    const rows = categories.flatMap((category) => category.rules.map((rule) => this.expandRuleRows(rule))).flat();
+    const filtered = rows.filter((row) => /visual|surface|dent|scratch|clean/i.test(row.name));
+    if (!filtered.length) {
+      return [
+        { test: 'FREEDOM FROM DEFECTS', required: 'THE TUBES SHALL BE CLEAN, SMOOTH, FREE FROM CRACKS, SEAMS, SLIVERS, SCALES AND IMPERFECTIONS.', observed: 'Found satisfactory' },
+        { test: 'FLATTENING TEST', required: 'THE TEST PIECE SHALL NOT CRACK WHEN CLOSE FLATTENED.', observed: 'Found satisfactory' },
+        { test: 'DRIFT EXPANDING TEST', required: 'NO CRACK OR FLAW UNTIL THE OUTSIDE DIAMETER IS EXPANDED.', observed: 'Found satisfactory' },
+        { test: 'EDDY-CURRENT TEST', required: 'THE TEST PIECE SHALL SHOW NO CRACKS.', observed: 'Found satisfactory' },
+        { test: 'HYDROSTATIC TEST', required: 'THE TUBE SHALL NOT SHOW ANY SIGN OF WEEPING OR LEAKING.', observed: 'Found satisfactory' },
+      ];
+    }
+    return filtered.map((row) => ({
+      test: row.name,
+      required: row.spec || 'As per standard',
+      observed: `${row.observed} (${row.status})`,
+    }));
+  }
+
+  private findRule(categories: Array<{ name: string; rules: Array<Record<string, any>> }>, keyword: string) {
+    return categories
+      .flatMap((category) => category.rules)
+      .find((rule) => String(rule.name ?? '').toLowerCase().includes(keyword));
+  }
+
+  private extractMinMax(spec: string) {
+    const minMatch = spec.match(/Min\s*([0-9.]+)/i);
+    const maxMatch = spec.match(/Max\s*([0-9.]+)/i);
+    return [minMatch?.[1] ?? '-', maxMatch?.[1] ?? '-'];
+  }
+
+  private expandRuleRows(rule: Record<string, any>): RuleRow[] {
     const ruleType = rule.ruleDefinition?.ruleType ?? '';
     const config = (rule.ruleDefinition?.ruleConfig ?? {}) as Record<string, any>;
     const results = rule.results ?? [];
 
     if (ruleType === 'MECHANICAL_PROPERTIES') {
       const keys = [
-        { key: 'tensile', label: 'Tensile' },
+        { key: 'tensile', label: 'Tensile Strength' },
         { key: 'elongation', label: 'Elongation' },
         ...(config.flatteningRequired ? [{ key: 'flattening', label: 'Flattening' }] : []),
         ...(config.driftRequired ? [{ key: 'drift', label: 'Drift' }] : []),
       ];
-
       return keys.map((entry, index) => ({
         name: `${rule.contextLabel ?? rule.name} - ${entry.label}`,
         observed:
@@ -483,85 +631,14 @@ export class PdfService {
     ];
   }
 
-  private getSpecText(
-    rule: PdfQcData['categories'][number]['rules'][number],
-    result?: { min: number | null; max: number | null },
-  ) {
+  private getSpecText(rule: Record<string, any>, result?: { min: number | null; max: number | null }) {
     const min = result?.min ?? rule.spec?.min ?? rule.min ?? null;
     const max = result?.max ?? rule.spec?.max ?? rule.max ?? null;
     const expectedValue = rule.spec?.expectedValue ?? rule.expectedValue ?? null;
-
-    if (min != null && max != null) {
-      return `Min ${min} - Max ${max}`;
-    }
-
-    if (min != null) {
-      return `Min ${min}`;
-    }
-
-    if (max != null) {
-      return `Max ${max}`;
-    }
-
-    if (expectedValue != null && expectedValue !== '') {
-      return `Expected ${expectedValue}`;
-    }
-
+    if (min != null && max != null) return `Min ${min} - Max ${max}`;
+    if (min != null) return `Min ${min}`;
+    if (max != null) return `Max ${max}`;
+    if (expectedValue != null && expectedValue !== '') return `Expected ${expectedValue}`;
     return '';
-  }
-
-  private drawRow(
-    doc: InstanceType<typeof PDFDocument>,
-    y: number,
-    cols: string[],
-    widths: number[],
-    isHeader = false,
-    colors: Array<string | undefined> = [],
-  ) {
-    let x = 40;
-
-    cols.forEach((text, index) => {
-      doc
-        .lineWidth(0.8)
-        .rect(x, y, widths[index], 20)
-        .fillAndStroke(isHeader ? '#f8fafc' : '#ffffff', '#111827');
-
-      doc
-        .fillColor(colors[index] ?? '#111827')
-        .fontSize(8)
-        .text(text, x + 5, y + 5, {
-          width: widths[index] - 10,
-          align: 'left',
-        });
-
-      x += widths[index];
-    });
-  }
-
-  private checkPageSpace(
-    doc: InstanceType<typeof PDFDocument>,
-    y: number,
-    requiredHeight: number,
-  ) {
-    if (y + requiredHeight > doc.page.height - 40) {
-      doc.addPage();
-      doc.y = 40;
-    }
-  }
-
-  private addFooters(doc: InstanceType<typeof PDFDocument>) {
-    const range = doc.bufferedPageRange();
-
-    for (let index = range.start; index < range.start + range.count; index += 1) {
-      doc.switchToPage(index);
-      const bottom = doc.page.height - 40;
-      doc
-        .fontSize(8)
-        .fillColor('#111827')
-        .text(`Generated by QC System | Page ${index + 1}`, this.left, bottom, {
-          width: this.pageWidth,
-          align: 'center',
-        });
-    }
   }
 }
