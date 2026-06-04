@@ -317,6 +317,7 @@ model QCTestResult {
   id       String  @id @default(uuid())
   qcTestId String
   ruleId   String
+  fieldKey String?
   observed Float
   min      Float?
   max      Float?

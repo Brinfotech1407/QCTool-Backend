@@ -40,8 +40,44 @@ type CustomerTcData = {
       sequence: number;
       rules: Array<Record<string, unknown>>;
     }>;
+    certificateSections?: CertificateSections;
   }>;
   chemicalComposition?: unknown;
+  certificate?: {
+    chemicalRows: CertificateChemicalRow[];
+    remarks: string;
+  };
+};
+
+type CertificateChemicalRow = {
+  sr: number;
+  element: string;
+  requiredMin: string;
+  requiredMax: string;
+  observed: string;
+  result: string;
+};
+
+type CertificateTableRow = {
+  sr: number;
+  test: string;
+  required: string;
+  observed: string;
+  result: string;
+};
+
+type CertificateDimensionRow = CertificateTableRow & {
+  size: string;
+  condition: string;
+  min: string;
+  max: string;
+};
+
+type CertificateSections = {
+  dimensionRows: CertificateDimensionRow[];
+  mechanicalRows: CertificateTableRow[];
+  metallurgicalRows: CertificateTableRow[];
+  remarks: string;
 };
 
 type BatchWithNestedItems = {
@@ -292,6 +328,7 @@ export class QcTestsService {
       const status = evaluation?.['pass'] ? 'PASS' : 'FAIL';
 
       return this.makeStoredResult(entry.ruleId, {
+        fieldKey: undefined,
         observed: normalizedObserved,
         min,
         max,
@@ -327,6 +364,7 @@ export class QcTestsService {
     return fields.map((field: any) => {
       const detail = evaluation?.details?.[field.name] ?? {};
       return this.makeStoredResult(rule.id, {
+        fieldKey: field.name,
         observed: Number(fieldObservations[field.name]),
         min: this.toNullableNumber(detail.min ?? null),
         max: this.toNullableNumber(detail.max ?? null),
@@ -389,6 +427,7 @@ export class QcTestsService {
       }
 
       return this.makeStoredResult(rule.id, {
+        fieldKey: key,
         observed:
           key === 'flattening' || key === 'drift'
             ? this.toBoolean(observedValue)
@@ -405,6 +444,7 @@ export class QcTestsService {
   private makeStoredResult(
     ruleId: string,
     data: {
+      fieldKey?: string;
       observed: number;
       min: number | null;
       max: number | null;
@@ -412,6 +452,7 @@ export class QcTestsService {
     },
   ) {
     return {
+      fieldKey: data.fieldKey,
       observed: data.observed,
       min: data.min,
       max: data.max,
@@ -526,6 +567,7 @@ export class QcTestsService {
                 itemId: item.id,
                 tests: item.qcTest.tests.map((test) => ({
                   ruleId: (test.rule as { id: string }).id,
+                  fieldKey: (test as any).fieldKey ?? null,
                   observed: test.observed,
                   status: test.status,
                 })),
@@ -625,17 +667,34 @@ export class QcTestsService {
         ...category,
         rules: category.rules.map((rule) => ({
           ...rule,
-          results: qcTest.tests
-            .filter((test) => test.rule.id === rule.id)
-            .map((test) => ({
-              id: test.id,
-              observed: test.observed,
-              min: test.min,
-              max: test.max,
+            results: qcTest.tests
+              .filter((test) => test.rule.id === rule.id)
+              .map((test) => ({
+                id: test.id,
+                fieldKey: (test as any).fieldKey ?? null,
+                observed: test.observed,
+                min: test.min,
+                max: test.max,
               status: test.status,
             })),
         })),
       }),
+    );
+    const chemicalComposition =
+      qcTest.batch.batchHits.find((entry) => entry.hit?.chemicalComposition)?.hit
+        .chemicalComposition ?? null;
+    const certificateSections = this.buildCertificateSections(
+      {
+        grade: qcTest.batch.grade,
+        gradeId: qcTest.batch.gradeId,
+      },
+      qcTest.item,
+      categories,
+    );
+    const chemicalRows = this.buildChemicalCertificateRows(
+      categories,
+      chemicalComposition,
+      qcTest.batch.grade || qcTest.batch.gradeId,
     );
 
     return {
@@ -662,8 +721,10 @@ export class QcTestsService {
         length: qcTest.item.length,
       },
       categories,
+      certificateSections,
       tests: qcTest.tests.map((test) => ({
         id: test.id,
+        fieldKey: (test as any).fieldKey ?? null,
         observed: test.observed,
         min: test.min,
         max: test.max,
@@ -677,9 +738,11 @@ export class QcTestsService {
           defaultCriteria: test.rule.defaultCriteria,
         },
       })),
-      chemicalComposition:
-        qcTest.batch.batchHits.find((entry) => entry.hit?.chemicalComposition)?.hit
-          .chemicalComposition ?? null,
+      chemicalComposition,
+      certificate: {
+        chemicalRows,
+        remarks: this.getCertificateRemark(),
+      },
     };
   }
 
@@ -781,6 +844,7 @@ export class QcTestsService {
               .filter((test) => test.rule.id === rule.id)
               .map((test) => ({
                 id: test.id,
+                fieldKey: (test as any).fieldKey ?? null,
                 observed: test.observed,
                 min: test.min,
                 max: test.max,
@@ -802,6 +866,14 @@ export class QcTestsService {
           length: item.length,
           status: itemStatus,
           categories,
+          certificateSections: this.buildCertificateSections(
+            {
+              grade: batch.grade,
+              gradeId: batch.gradeId,
+            },
+            item,
+            categories,
+          ),
         };
       })
       .filter((item): item is NonNullable<typeof item> => item !== null);
@@ -826,7 +898,500 @@ export class QcTestsService {
       chemicalComposition:
         batch.batchHits.find((entry) => entry.hit?.chemicalComposition)?.hit
           .chemicalComposition ?? null,
+      certificate: {
+        chemicalRows: this.buildChemicalCertificateRows(
+          items[0]?.categories ?? [],
+          batch.batchHits.find((entry) => entry.hit?.chemicalComposition)?.hit
+            ?.chemicalComposition ?? null,
+          batch.grade || batch.gradeId,
+        ),
+        remarks: this.getCertificateRemark(),
+      },
     };
+  }
+
+  private buildCertificateSections(
+    batch: { grade?: string | null; gradeId?: string | null },
+    item: {
+      od: number;
+      wt: number;
+      length: number;
+      condition: string;
+    },
+    categories: Array<{
+      name: string;
+      sequence: number;
+      rules: Array<Record<string, unknown>>;
+    }>,
+  ): CertificateSections {
+    const size = `OD ${item.od} x WT ${item.wt} x L ${item.length ?? '-'}`;
+    const condition = item.condition ?? '-';
+    const rows = categories.flatMap((category) =>
+      category.rules.flatMap((rule) =>
+        this.expandCertificateRuleRows(rule, category.name),
+      ),
+    );
+    const findRow = (
+      matcher: (row: ReturnType<typeof this.expandCertificateRuleRows>[number]) => boolean,
+    ) => rows.find(matcher);
+    const odRow = findRow(
+      (row) => /\bod\b|outside diameter/i.test(row.test),
+    );
+    const wtRow = findRow(
+      (row) => /\bwt\b|wall thickness|thickness/i.test(row.test),
+    );
+    const roundnessRow = findRow((row) => /round/i.test(row.test));
+    const straightnessRow = findRow((row) => /straight/i.test(row.test));
+    const lengthRow = findRow((row) => /\blength\b/i.test(row.test));
+
+    const [odMin, odMax] = this.extractCertificateMinMax(odRow?.required ?? '');
+    const [wtMin, wtMax] = this.extractCertificateMinMax(wtRow?.required ?? '');
+
+    const dimensionRows: CertificateDimensionRow[] = [
+      {
+        sr: 1,
+        size,
+        condition,
+        test: 'Outside Diameter',
+        min: odMin,
+        max: odMax,
+        required: odRow?.required ?? '-',
+        observed: this.formatCertificateValue(odRow?.observed ?? item.od),
+        result: odRow?.result ?? '-',
+      },
+      {
+        sr: 2,
+        size,
+        condition,
+        test: 'Wall Thickness',
+        min: wtMin,
+        max: wtMax,
+        required: wtRow?.required ?? '-',
+        observed: this.formatCertificateValue(wtRow?.observed ?? item.wt),
+        result: wtRow?.result ?? '-',
+      },
+      {
+        sr: 3,
+        size,
+        condition,
+        test: 'Roundness',
+        min: this.extractCertificateMinMax(roundnessRow?.required ?? '')[0],
+        max: this.extractCertificateMinMax(roundnessRow?.required ?? '')[1],
+        required: roundnessRow?.required ?? '-',
+        observed: this.formatCertificateValue(roundnessRow?.observed),
+        result: roundnessRow?.result ?? '-',
+      },
+      {
+        sr: 4,
+        size,
+        condition,
+        test: 'Straightness',
+        min: this.extractCertificateMinMax(straightnessRow?.required ?? '')[0],
+        max: this.extractCertificateMinMax(straightnessRow?.required ?? '')[1],
+        required: straightnessRow?.required ?? '-',
+        observed: this.formatCertificateValue(straightnessRow?.observed),
+        result: straightnessRow?.result ?? '-',
+      },
+      {
+        sr: 5,
+        size,
+        condition,
+        test: 'Length',
+        min: this.extractCertificateMinMax(lengthRow?.required ?? '')[0],
+        max: this.extractCertificateMinMax(lengthRow?.required ?? '')[1],
+        required: lengthRow?.required ?? '-',
+        observed: this.formatCertificateValue(lengthRow?.observed ?? item.length),
+        result: lengthRow?.result ?? '-',
+      },
+    ];
+
+    const mechanicalOrder = ['tensile', 'elongation', 'flattening', 'drift'];
+    const mechanicalLabels: Record<string, string> = {
+      tensile: 'Tensile',
+      elongation: 'Elongation',
+      flattening: 'Flattening',
+      drift: 'Drift Expanding',
+    };
+    const mechanicalRows = rows
+      .filter((row) => row.ruleType === 'MECHANICAL_PROPERTIES')
+      .sort(
+        (left, right) =>
+          mechanicalOrder.findIndex((key) =>
+            left.test.toLowerCase().includes(key),
+          ) -
+          mechanicalOrder.findIndex((key) =>
+            right.test.toLowerCase().includes(key),
+          ),
+      )
+      .map((row, index) => ({
+        sr: index + 1,
+        test:
+          mechanicalLabels[
+            mechanicalOrder.find((key) =>
+              row.test.toLowerCase().includes(key),
+            ) ?? 'tensile'
+          ] ?? row.test,
+        required: row.required,
+        observed: row.observed,
+        result: row.result,
+      }));
+
+    const metallurgicalRows = rows
+      .filter(
+        (row) =>
+          /grain/i.test(row.test) ||
+          /metallurgical|microscopic/i.test(row.categoryName),
+      )
+      .map((row, index) => ({
+        sr: index + 1,
+        test: row.test,
+        required: row.required,
+        observed: row.observed,
+        result: row.result,
+      }));
+
+    return {
+      dimensionRows,
+      mechanicalRows,
+      metallurgicalRows,
+      remarks: this.getCertificateRemark(),
+    };
+  }
+
+  private buildChemicalCertificateRows(
+    categories: Array<{ name: string; sequence: number; rules: Array<Record<string, unknown>> }>,
+    chemicalComposition: unknown,
+    gradeKey?: string | null,
+  ): CertificateChemicalRow[] {
+    const chemicalRule = categories
+      .flatMap((category) => category.rules)
+      .find(
+        (rule) =>
+          String((rule as any).ruleType ?? '').toUpperCase() ===
+          RuleType.CHEMICAL_COMPOSITION,
+      ) as Record<string, any> | undefined;
+
+    const entries = chemicalComposition && typeof chemicalComposition === 'object'
+      ? (chemicalComposition as Record<string, unknown>)
+      : {};
+
+    const normalizedEntryMap = new Map<string, unknown>();
+    Object.entries(entries).forEach(([key, value]) => {
+      normalizedEntryMap.set(this.normalizeCertificateKey(key), value);
+    });
+
+    const ruleConfig = chemicalRule?.parameter?.ruleDefinition?.ruleConfig ??
+      chemicalRule?.ruleDefinition?.ruleConfig ??
+      {};
+    const migratedColumns = Array.isArray(ruleConfig.columns)
+      ? ruleConfig.columns
+      : [
+          { id: 'cuAgMin', name: 'Cu + Ag', type: 'MIN' },
+          { id: 'pMin', name: 'P', type: 'MIN' },
+          { id: 'pMax', name: 'P', type: 'MAX' },
+          { id: 'oMax', name: 'O', type: 'MAX' },
+        ];
+    const migratedGrades = Array.isArray(ruleConfig.grades)
+      ? ruleConfig.grades
+      : [];
+    const gradeRule = migratedGrades.find(
+      (entry: any) =>
+        String(entry?.key ?? '').trim().toLowerCase() ===
+        String(gradeKey ?? '').trim().toLowerCase(),
+    );
+
+    const grouped = new Map<
+      string,
+      { element: string; requiredMin: string; requiredMax: string; observed: string }
+    >();
+
+    migratedColumns.forEach((column: any) => {
+      const element = String(column?.name ?? '').trim();
+      if (!element) {
+        return;
+      }
+
+      const existing = grouped.get(element) ?? {
+        element,
+        requiredMin: '-',
+        requiredMax: '-',
+        observed: this.formatCertificateValue(
+          normalizedEntryMap.get(this.normalizeCertificateKey(element)),
+        ),
+      };
+
+      const configuredValue = gradeRule?.values?.[column.id];
+      if (column.type === 'MIN') {
+        existing.requiredMin = this.formatCertificateValue(configuredValue);
+      }
+      if (column.type === 'MAX') {
+        existing.requiredMax = this.formatCertificateValue(configuredValue);
+      }
+
+      grouped.set(element, existing);
+    });
+
+    Object.entries(entries).forEach(([key, value]) => {
+      const element = this.toCertificateDisplayName(key);
+      const normalizedElement = this.normalizeCertificateKey(element);
+
+      if (!grouped.has(element) && !grouped.has(normalizedElement)) {
+        grouped.set(element, {
+          element,
+          requiredMin: '-',
+          requiredMax: '-',
+          observed: this.formatCertificateValue(value),
+        });
+      }
+    });
+
+    return [...grouped.values()].map((row, index) => ({
+      sr: index + 1,
+      element: row.element,
+      requiredMin: row.requiredMin,
+      requiredMax: row.requiredMax,
+      observed: row.observed,
+      result: this.resolveChemicalResult(
+        row.requiredMin,
+        row.requiredMax,
+        row.observed,
+      ),
+    }));
+  }
+
+  private expandCertificateRuleRows(rule: Record<string, any>, categoryName: string) {
+    const ruleType = String(rule.ruleType ?? rule.ruleDefinition?.ruleType ?? '');
+    const config = (rule.parameter?.ruleDefinition?.ruleConfig ??
+      rule.ruleDefinition?.ruleConfig ??
+      {}) as Record<string, any>;
+    const results = Array.isArray(rule.results) ? rule.results : [];
+    const resultByFieldKey = new Map(
+      results.map((result: any) => [String(result.fieldKey ?? ''), result]),
+    );
+
+    if (ruleType === RuleType.MECHANICAL_PROPERTIES) {
+      const keys = [
+        { key: 'tensile', label: 'Tensile' },
+        { key: 'elongation', label: 'Elongation' },
+        ...(config.flatteningRequired ? [{ key: 'flattening', label: 'Flattening' }] : []),
+        ...(config.driftRequired ? [{ key: 'drift', label: 'Drift Expanding' }] : []),
+      ];
+
+      return keys.map((entry) => {
+        const result = this.resolveMechanicalResultForKey(
+          entry.key,
+          results,
+          resultByFieldKey,
+        );
+        return {
+          categoryName,
+          ruleType,
+          test: entry.label,
+          required: this.getCertificateSpecText(rule, result, entry.label),
+          observed:
+            entry.key === 'flattening' || entry.key === 'drift'
+              ? Number(result?.observed) === 1
+              ? 'Yes'
+              : 'No'
+              : this.formatCertificateValue(result?.observed),
+          result: result?.status ?? 'PENDING',
+        };
+      });
+    }
+
+    if (ruleType === RuleType.GENERIC_CONDITION) {
+      return (config.fields ?? []).map((field: any, index: number) => {
+        const result =
+          resultByFieldKey.get(String(field.name ?? '')) ??
+          results[index] ??
+          null;
+        return {
+          categoryName,
+          ruleType,
+          test: field.label || field.name,
+          required: this.getCertificateSpecText(rule, result, field.name),
+          observed: this.formatCertificateValue(result?.observed),
+          result: result?.status ?? 'PENDING',
+        };
+      });
+    }
+
+    if (ruleType === RuleType.TEXT_BOOLEAN) {
+      return [
+        {
+          categoryName,
+          ruleType,
+          test: String(rule.contextLabel ?? rule.name),
+          required: this.getCertificateSpecText(rule, results[0]),
+          observed: Number(results[0]?.observed) === 1 ? 'Yes' : 'No',
+          result: results[0]?.status ?? 'PENDING',
+        },
+      ];
+    }
+
+    return [
+      {
+        categoryName,
+        ruleType,
+        test: String(rule.contextLabel ?? rule.name),
+        required: this.getCertificateSpecText(rule, results[0]),
+        observed: this.formatCertificateValue(results[0]?.observed),
+        result: results[0]?.status ?? 'PENDING',
+      },
+    ];
+  }
+
+  private getCertificateSpecText(
+    rule: Record<string, any>,
+    result?: { min: number | null; max: number | null },
+    fieldName?: string,
+  ) {
+    const min = result?.min ?? rule.spec?.min ?? rule.min ?? null;
+    const max = result?.max ?? rule.spec?.max ?? rule.max ?? null;
+    const expectedValue = rule.spec?.expectedValue ?? rule.expectedValue ?? null;
+
+    if (fieldName) {
+      const parts = [
+        min != null ? `Min: ${min}` : null,
+        max != null ? `Max: ${max}` : null,
+      ].filter(Boolean);
+      return parts.join(' | ') || 'Configured';
+    }
+
+    if (min != null && max != null) {
+      return `Min: ${min} | Max: ${max}`;
+    }
+    if (min != null) {
+      return `Min: ${min}`;
+    }
+    if (max != null) {
+      return `Max: ${max}`;
+    }
+    if (expectedValue != null && expectedValue !== '') {
+      return `Expected: ${expectedValue}`;
+    }
+    return 'Configured';
+  }
+
+  private resolveMechanicalResultForKey(
+    key: string,
+    results: Array<any>,
+    resultByFieldKey: Map<string, any>,
+  ) {
+    const keyed =
+      resultByFieldKey.get(key) ??
+      results.find((candidate: any) => candidate.fieldKey === key);
+    if (keyed) {
+      return keyed;
+    }
+
+    const numericRows = results.filter(
+      (candidate: any) =>
+        Number.isFinite(candidate?.observed) &&
+        (candidate?.min !== null || candidate?.max !== null),
+    );
+    const booleanRows = results.filter((candidate: any) => {
+      const observed = Number(candidate?.observed);
+      return observed === 0 || observed === 1;
+    });
+
+    if (key === 'tensile') {
+      return (
+        numericRows.find(
+          (candidate: any) => candidate?.min !== null && candidate?.max !== null,
+        ) ??
+        numericRows[0] ??
+        null
+      );
+    }
+
+    if (key === 'elongation') {
+      return (
+        numericRows.find(
+          (candidate: any) => candidate?.min !== null && candidate?.max === null,
+        ) ??
+        numericRows.find(
+          (candidate: any) => candidate?.min === null && candidate?.max !== null,
+        ) ??
+        numericRows[1] ??
+        null
+      );
+    }
+
+    if (key === 'flattening') {
+      return booleanRows[0] ?? null;
+    }
+
+    if (key === 'drift') {
+      return booleanRows[1] ?? booleanRows[0] ?? null;
+    }
+
+    return null;
+  }
+
+  private extractCertificateMinMax(spec: string) {
+    const minMatch = spec.match(/Min:\s*([^\s|]+)/i);
+    const maxMatch = spec.match(/Max:\s*([^\s|]+)/i);
+    return [minMatch?.[1] ?? '-', maxMatch?.[1] ?? '-'];
+  }
+
+  private getCertificateRemark() {
+    return 'Test specimen of tubes shall not show any gassing or open grain structure.';
+  }
+
+  private resolveChemicalResult(
+    requiredMin: string,
+    requiredMax: string,
+    observed: string,
+  ) {
+    const observedValue = Number(observed);
+    if (!Number.isFinite(observedValue)) {
+      return '-';
+    }
+
+    const minValue = Number(requiredMin);
+    const maxValue = Number(requiredMax);
+    const hasMin = requiredMin !== '-' && Number.isFinite(minValue);
+    const hasMax = requiredMax !== '-' && Number.isFinite(maxValue);
+
+    if (!hasMin && !hasMax) {
+      return '-';
+    }
+
+    if (hasMin && observedValue < minValue) {
+      return 'FAIL';
+    }
+
+    if (hasMax && observedValue > maxValue) {
+      return 'FAIL';
+    }
+
+    return 'PASS';
+  }
+
+  private formatCertificateValue(value: unknown) {
+    if (value === null || value === undefined || value === '') {
+      return '-';
+    }
+    return String(value);
+  }
+
+  private normalizeCertificateKey(value: string) {
+    return String(value).trim().toLowerCase().replace(/[^a-z0-9]/g, '');
+  }
+
+  private toCertificateDisplayName(key: string) {
+    const normalized = this.normalizeCertificateKey(key);
+    if (normalized === 'p' || normalized === 'pmin' || normalized === 'pmax') {
+      return 'P';
+    }
+    if (normalized === 'o' || normalized === 'omax') {
+      return 'O';
+    }
+    if (normalized === 'cuag' || normalized === 'cuagmin') {
+      return 'Cu + Ag';
+    }
+    return key;
   }
 
   private getCompanyScope(user: JwtUser): Record<string, string> {

@@ -1,0 +1,2 @@
+ALTER TABLE "QCTestResult"
+ADD COLUMN "fieldKey" TEXT;

@@ -249,7 +249,11 @@ export class RuleEngineService {
         continue;
       }
 
-      const actualVal = chemicalValues[col.id];
+      const actualVal =
+        chemicalValues[col.id] ??
+        chemicalValues[col.name] ??
+        chemicalValues[String(col.name).trim()] ??
+        this.findChemicalValueByNormalizedName(chemicalValues, col.name);
       if (actualVal === undefined || actualVal === null) {
         pass = false; // Missing value fails validation if it's required
         details[col.name] = false;
@@ -268,6 +272,22 @@ export class RuleEngineService {
     }
 
     return { pass, details };
+  }
+
+  private findChemicalValueByNormalizedName(
+    chemicalValues: Record<string, unknown>,
+    targetName: string,
+  ) {
+    const normalizedTarget = this.normalizeChemicalKey(targetName);
+    const matchedEntry = Object.entries(chemicalValues).find(
+      ([key]) => this.normalizeChemicalKey(key) === normalizedTarget,
+    );
+
+    return matchedEntry?.[1];
+  }
+
+  private normalizeChemicalKey(value: string) {
+    return String(value).trim().toLowerCase().replace(/[^a-z0-9]+/g, '');
   }
 
   private evaluateMechanical(config: any, batchContext: any) {

@@ -13,6 +13,37 @@ type RuleRow = {
   status: string;
 };
 
+type CertificateChemicalRow = {
+  sr: number;
+  element: string;
+  requiredMin: string;
+  requiredMax: string;
+  observed: string;
+  result: string;
+};
+
+type CertificateTableRow = {
+  sr: number;
+  test: string;
+  required: string;
+  observed: string;
+  result: string;
+};
+
+type CertificateDimensionRow = CertificateTableRow & {
+  size: string;
+  condition: string;
+  min: string;
+  max: string;
+};
+
+type CertificateSections = {
+  dimensionRows: CertificateDimensionRow[];
+  mechanicalRows: CertificateTableRow[];
+  metallurgicalRows: CertificateTableRow[];
+  remarks: string;
+};
+
 type PdfQcData = {
   status: string;
   batch: {
@@ -34,6 +65,11 @@ type PdfQcData = {
     rules: Array<Record<string, any>>;
   }>;
   chemicalComposition?: unknown;
+  certificateSections?: CertificateSections;
+  certificate?: {
+    chemicalRows: CertificateChemicalRow[];
+    remarks: string;
+  };
 };
 
 type PdfCustomerTcData = {
@@ -55,8 +91,13 @@ type PdfCustomerTcData = {
       name: string;
       rules: Array<Record<string, any>>;
     }>;
+    certificateSections?: CertificateSections;
   }>;
   chemicalComposition?: unknown;
+  certificate?: {
+    chemicalRows: CertificateChemicalRow[];
+    remarks: string;
+  };
 };
 
 @Injectable()
@@ -80,13 +121,18 @@ export class PdfService {
     doc.pipe(res);
 
     this.renderCertificateHeader(doc, qcData.batch.batchNumber, qcData.customer.name, qcData);
-    this.renderChemicalSection(doc, qcData.chemicalComposition);
-    this.renderDimensionalSection(doc, qcData.batch.batchNumber, [qcData.item], qcData.categories);
-    this.renderMechanicalSection(doc, qcData.categories);
-    this.renderRoundnessSection(doc, qcData.categories);
-    this.renderStraightnessSection(doc, [qcData.item]);
-    this.renderVisualSection(doc, qcData.categories);
-    this.renderRemarks(doc, qcData.status);
+    this.renderChemicalSection(doc, qcData.certificate?.chemicalRows ?? []);
+    this.renderDimensionSection(doc, qcData.certificateSections?.dimensionRows ?? []);
+    this.renderMechanicalSection(doc, qcData.certificateSections?.mechanicalRows ?? []);
+    this.renderMetallurgicalSection(
+      doc,
+      qcData.certificateSections?.metallurgicalRows ?? [],
+    );
+    this.renderRemarks(
+      doc,
+      qcData.status,
+      qcData.certificateSections?.remarks ?? qcData.certificate?.remarks,
+    );
     this.renderSignatureSection(doc);
 
     doc.end();
@@ -102,23 +148,22 @@ export class PdfService {
     doc.pipe(res);
 
     this.renderCertificateHeader(doc, tcData.batch.batchNumber, tcData.customer.name, tcData);
-    this.renderChemicalSection(doc, tcData.chemicalComposition);
-    this.renderDimensionalSection(doc, tcData.batch.batchNumber, tcData.items, tcData.items[0]?.categories ?? []);
-    this.renderMechanicalSection(
-      doc,
-      tcData.items.flatMap((item) => item.categories),
-    );
-    this.renderRoundnessSection(
-      doc,
-      tcData.items.flatMap((item) => item.categories),
-    );
-    this.renderStraightnessSection(doc, tcData.items);
-    this.renderVisualSection(
-      doc,
-      tcData.items.flatMap((item) => item.categories),
-    );
+    this.renderChemicalSection(doc, tcData.certificate?.chemicalRows ?? []);
+    tcData.items.forEach((item, index) => {
+      this.renderItemHeader(doc, item, index + 1);
+      this.renderDimensionSection(doc, item.certificateSections?.dimensionRows ?? []);
+      this.renderMechanicalSection(doc, item.certificateSections?.mechanicalRows ?? []);
+      this.renderMetallurgicalSection(
+        doc,
+        item.certificateSections?.metallurgicalRows ?? [],
+      );
+    });
     const overallStatus = tcData.items.some((item) => item.status === 'FAIL') ? 'FAIL' : 'PASS';
-    this.renderRemarks(doc, overallStatus);
+    this.renderRemarks(
+      doc,
+      overallStatus,
+      tcData.certificate?.remarks ?? tcData.items[0]?.certificateSections?.remarks,
+    );
     this.renderSignatureSection(doc);
 
     doc.end();
@@ -162,98 +207,143 @@ export class PdfService {
     this.drawRow(doc, metaY + 28, ['P. O. NO. / INVOICE NO', ':N.A'], cols, { fontSize: 6.4 });
     this.drawRow(doc, metaY + 42, ['PRODUCT', ':WROUGHT COPPER TUBES FOR REFRIGERATION AND AIR CONDITIONING PURPOSES'], cols, { fontSize: 6.1 });
     this.drawRow(doc, metaY + 56, ['SPECIFICATION', ':SPECIFICATION AS PER IS 10773:2025'], cols, { fontSize: 6.1 });
-    doc.y = metaY + 72;
+    this.drawRow(
+      doc,
+      metaY + 70,
+      ['GRADE', `:${data?.batch?.grade || data?.batch?.gradeId || '-'}`],
+      cols,
+      { fontSize: 6.1 },
+    );
+    doc.y = metaY + 86;
   }
 
-  private renderChemicalSection(doc: InstanceType<typeof PDFDocument>, chemicalComposition: unknown) {
-    this.ensurePageSpace(doc, 80, () => this.drawSectionHeader(doc, 'CHEMICAL COMPOSITION (%)'));
+  private renderChemicalSection(
+    doc: InstanceType<typeof PDFDocument>,
+    rows: CertificateChemicalRow[],
+  ) {
+    this.ensurePageSpace(doc, 80, () =>
+      this.drawSectionHeader(doc, 'CHEMICAL COMPOSITION (%)'),
+    );
     this.drawSectionHeader(doc, 'CHEMICAL COMPOSITION (%)');
     const startY = doc.y;
-    const cols = [24, 100, 70, 60, 70, 70, this.contentWidth - 394];
+    const cols = [24, 148, 84, 84, 84, this.contentWidth - 424];
     this.drawRow(
       doc,
       startY,
-      ['REQUIRED - AS PER IS 10773:2025', '', '', '', 'OBSERVED CHEMICAL ANALYSIS', 'BATCH NO.', ''],
+      ['SR', 'ELEMENT', 'MIN', 'MAX', 'OBSERVED', 'RESULT'],
       cols,
-      { fontSize: 6, bold: true },
+      { fontSize: 6.5, bold: true },
     );
-    this.drawRow(doc, startY + 14, ['SR NO.', 'ELEMENTS', 'MINI.%', 'MAX.%', '(Batch No)', '(Batch No)', ''], cols, {
-      fontSize: 6.5,
-      bold: true,
-    });
 
-    const entries = this.getChemicalEntries(chemicalComposition);
-    const rows = entries.length
-      ? entries
-      : [{ element: '-', value: '-', min: '-', max: '-' }];
-
-    rows.forEach((entry, index) => {
-      const rowY = startY + 28 + index * 14;
+    const safeRows = rows.length
+      ? rows
+      : [{ sr: 1, element: '-', requiredMin: '-', requiredMax: '-', observed: '-', result: '-' }];
+    safeRows.forEach((row, index) => {
+      const rowY = startY + 14 + index * 12;
       this.ensurePageSpace(doc, 20, () => {
         this.drawSectionHeader(doc, 'CHEMICAL COMPOSITION (%)');
-        this.drawRow(doc, doc.y, ['REQUIRED - AS PER IS 10773:2025', '', '', '', 'OBSERVED CHEMICAL ANALYSIS', '', ''], cols, {
-          fontSize: 6,
-          bold: true,
-        });
-        this.drawRow(doc, doc.y + 14, ['SR NO.', 'ELEMENTS', 'MINI.%', 'MAX.%', '(Batch No)', '(Batch No)', ''], cols, {
-          fontSize: 6.5,
-          bold: true,
-        });
+        this.drawRow(
+          doc,
+          doc.y,
+          ['SR', 'ELEMENT', 'MIN', 'MAX', 'OBSERVED', 'RESULT'],
+          cols,
+          { fontSize: 6.5, bold: true },
+        );
       });
       this.drawRow(
         doc,
         rowY,
-        [String(index + 1), entry.element, entry.min, entry.max, entry.value, entry.value, ''],
+        [
+          String(row.sr),
+          row.element,
+          row.requiredMin,
+          row.requiredMax,
+          row.observed,
+          row.result,
+        ],
         cols,
-        { fontSize: 6.5 },
+        { fontSize: 6.4 },
       );
     });
 
-    doc.y = startY + 28 + rows.length * 14 + 4;
+    doc.y = startY + 14 + safeRows.length * 12 + 4;
   }
 
-  private renderDimensionalSection(
+  private renderItemHeader(
     doc: InstanceType<typeof PDFDocument>,
-    batchNo: string,
-    items: Array<{ od: number; wt: number; qty?: number; length?: number }>,
-    categories: Array<{ name: string; rules: Array<Record<string, any>> }>,
+    item: PdfCustomerTcData['items'][number],
+    index: number,
   ) {
-    this.ensurePageSpace(doc, 80, () => this.drawSectionHeader(doc, 'DIMENSIONAL MEASUREMENTS'));
+    this.ensurePageSpace(doc, 28, () => undefined);
+    const y = doc.y;
+    this.drawCell(
+      doc,
+      this.margin,
+      y,
+      this.contentWidth,
+      16,
+      `Size: ${item.od} x ${item.wt}    Condition: ${item.condition ?? '-'}`,
+      { fontSize: 7, bold: true },
+    );
+    doc.y = y + 16;
+  }
+
+  private renderDimensionSection(
+    doc: InstanceType<typeof PDFDocument>,
+    rows: CertificateDimensionRow[],
+  ) {
+    this.ensurePageSpace(doc, 80, () =>
+      this.drawSectionHeader(doc, 'DIMENSIONAL MEASUREMENTS'),
+    );
     this.drawSectionHeader(doc, 'DIMENSIONAL MEASUREMENTS');
     const y = doc.y;
-    const cols = [20, 52, 62, 50, 50, 62, 50, 50, 72, 47];
+    const cols = [24, 154, 72, 72, 92, this.contentWidth - 414];
     this.drawRow(
       doc,
       y,
-      ['SR', 'SIZE MM', 'OUTSIDE DIAMETER (OD) MM', '', '', 'WALL THICKNESS (WT) MM', '', '', 'BATCH NO', 'QTY'],
-      cols,
-      { fontSize: 6.1, bold: true },
-    );
-    this.drawRow(
-      doc,
-      y + 14,
-      ['', '', 'Tolerance', 'Min', 'Max', 'Tolerance', 'Min', 'Max', '', '(KGS)'],
+      [
+        'SR',
+        'TEST',
+        'MIN',
+        'MAX',
+        'OBSERVED',
+        'RESULT',
+      ],
       cols,
       { fontSize: 6.2, bold: true },
     );
 
-    const dimRules = this.extractDimensionalRules(categories);
-    items.forEach((item, index) => {
-      const spec = dimRules[index] ?? dimRules[0];
-      const rowY = y + 28 + index * 28;
-      this.ensurePageSpace(doc, 34, () => {
+    const safeRows = rows.length
+      ? rows
+      : [
+          {
+            sr: 1,
+            test: 'Outside Diameter',
+            required: '-',
+            observed: '-',
+            result: '-',
+            min: '-',
+            max: '-',
+            size: '-',
+            condition: '-',
+          },
+        ];
+
+    safeRows.forEach((row, index) => {
+      const rowY = y + 14 + index * 12;
+      this.ensurePageSpace(doc, 20, () => {
         this.drawSectionHeader(doc, 'DIMENSIONAL MEASUREMENTS');
         this.drawRow(
           doc,
           doc.y,
-          ['SR', 'SIZE MM', 'OUTSIDE DIAMETER (OD) MM', '', '', 'WALL THICKNESS (WT) MM', '', '', 'BATCH NO', 'QTY'],
-          cols,
-          { fontSize: 6.1, bold: true },
-        );
-        this.drawRow(
-          doc,
-          doc.y + 14,
-          ['', '', 'Tolerance', 'Min', 'Max', 'Tolerance', 'Min', 'Max', '', '(KGS)'],
+          [
+            'SR',
+            'TEST',
+            'MIN',
+            'MAX',
+            'OBSERVED',
+            'RESULT',
+          ],
           cols,
           { fontSize: 6.2, bold: true },
         );
@@ -262,123 +352,101 @@ export class PdfService {
         doc,
         rowY,
         [
-          String(index + 1),
-          `${item.od} x ${item.wt}`,
-          spec.odTolerance,
-          spec.odMin,
-          spec.odMax,
-          spec.wtTolerance,
-          spec.wtMin,
-          spec.wtMax,
-          batchNo.slice(0, 14),
-          String(item.qty ?? '-'),
+          String(row.sr),
+          row.test,
+          row.min,
+          row.max,
+          row.observed,
+          row.result,
         ],
         cols,
-        { fontSize: 6.2 },
+        { fontSize: 6.1 },
       );
+    });
+
+    doc.y = y + 14 + safeRows.length * 12 + 4;
+  }
+
+  private renderMechanicalSection(
+    doc: InstanceType<typeof PDFDocument>,
+    rows: CertificateTableRow[],
+  ) {
+    this.renderCertificateTestSection(
+      doc,
+      'MECHANICAL TEST',
+      'Test',
+      rows,
+    );
+  }
+
+  private renderMetallurgicalSection(
+    doc: InstanceType<typeof PDFDocument>,
+    rows: CertificateTableRow[],
+  ) {
+    this.renderCertificateTestSection(
+      doc,
+      'METALLURGICAL TEST',
+      'Metallurgical Test',
+      rows,
+    );
+  }
+
+  private renderCertificateTestSection(
+    doc: InstanceType<typeof PDFDocument>,
+    title: string,
+    testLabel: string,
+    rows: CertificateTableRow[],
+  ) {
+    this.ensurePageSpace(doc, 70, () => this.drawSectionHeader(doc, title));
+    this.drawSectionHeader(doc, title);
+    const y = doc.y;
+    const cols = [24, 190, 140, 85, this.contentWidth - 439];
+    this.drawRow(
+      doc,
+      y,
+      ['SR', testLabel, 'Required', 'Observed', 'Result'],
+      cols,
+      { fontSize: 6.4, bold: true },
+    );
+
+    const safeRows = rows.length
+      ? rows
+      : [{ sr: 1, test: '-', required: '-', observed: '-', result: '-' }];
+    safeRows.forEach((row, index) => {
+      const rowY = y + 14 + index * 12;
+      this.ensurePageSpace(doc, 20, () => {
+        this.drawSectionHeader(doc, title);
+        this.drawRow(
+          doc,
+          doc.y,
+          ['SR', testLabel, 'Required', 'Observed', 'Result'],
+          cols,
+          { fontSize: 6.4, bold: true },
+        );
+      });
       this.drawRow(
         doc,
-        rowY + 14,
-        ['', 'Observed', String(item.od), '', '', String(item.wt), '', '', '', ''],
-        cols,
-        { fontSize: 6.2 },
-      );
-    });
-
-    doc.y = y + 28 + items.length * 28 + 4;
-  }
-
-  private renderMechanicalSection(doc: InstanceType<typeof PDFDocument>, categories: Array<{ name: string; rules: Array<Record<string, any>> }>) {
-    this.ensurePageSpace(doc, 90, () => this.drawSectionHeader(doc, 'MECHANICAL & METALLURGICAL PROPERTIES'));
-    this.drawSectionHeader(doc, 'MECHANICAL & METALLURGICAL PROPERTIES');
-    const startY = doc.y;
-    const cols = [20, 92, 70, 50, 70, 50, 70, this.contentWidth - 422];
-    this.drawRow(doc, startY, ['TEMPER', '', 'LIGHT ANNEALED', '', 'SOFT ANNEALED', '', '', 'Remarks'], cols, {
-      bold: true,
-      fontSize: 6,
-    });
-    this.drawRow(doc, startY + 14, ['SR. NO', 'PROPERTIES', 'REQUIRED', 'OBSERVED', 'REQUIRED', 'OBSERVED', '', ''], cols, {
-      bold: true,
-      fontSize: 6,
-    });
-
-    const rows = this.extractMechanicalRows(categories);
-    rows.forEach((row, index) => {
-      const rowY = startY + 28 + index * 12;
-      this.ensurePageSpace(doc, 20, () => {
-        this.drawSectionHeader(doc, 'MECHANICAL & METALLURGICAL PROPERTIES');
-        this.drawRow(doc, doc.y, ['TEMPER', '', 'LIGHT ANNEALED', '', 'SOFT ANNEALED', '', '', 'Remarks'], cols, {
-          bold: true,
-          fontSize: 6,
-        });
-        this.drawRow(doc, doc.y + 14, ['SR. NO', 'PROPERTIES', 'REQUIRED', 'OBSERVED', 'REQUIRED', 'OBSERVED', '', ''], cols, {
-          bold: true,
-          fontSize: 6,
-        });
-      });
-      this.drawRow(doc, rowY, [String(index + 1), row.property, row.required, row.observed, row.required, row.observed, '', row.result], cols, {
-        fontSize: 6.2,
-      });
-    });
-
-    doc.y = startY + 28 + rows.length * 12 + 3;
-  }
-
-  private renderRoundnessSection(doc: InstanceType<typeof PDFDocument>, categories: Array<{ name: string; rules: Array<Record<string, any>> }>) {
-    this.ensurePageSpace(doc, 60, () => this.drawSectionHeader(doc, 'ROUNDNESS'));
-    this.drawSectionHeader(doc, 'ROUNDNESS');
-    const y = doc.y;
-    const rule = this.findRule(categories, 'round');
-    const row = rule
-      ? this.expandRuleRows(rule)[0]
-      : { spec: '-', observed: '-', status: '-' };
-    const cols = [26, 140, 120, 100, this.contentWidth - 386];
-    this.drawRow(doc, y, ['1', 't/D based tolerance formula', row.spec, String(row.observed), `Result ${row.status}`], cols, {
-      bold: true,
-      fontSize: 6.2,
-    });
-    doc.y = y + 18;
-  }
-
-  private renderStraightnessSection(
-    doc: InstanceType<typeof PDFDocument>,
-    items: Array<{ length?: number; condition?: string }>,
-  ) {
-    this.ensurePageSpace(doc, 55, () => this.drawSectionHeader(doc, 'STRAIGHTNESS & LENGTH'));
-    this.drawSectionHeader(doc, 'STRAIGHTNESS & LENGTH');
-    const y = doc.y;
-    const cols = [40, 200, this.contentWidth - 240];
-    this.drawRow(doc, y, ['1', 'Length', 'N.A'], cols, { fontSize: 6.5 });
-    this.drawRow(doc, y + 14, ['2', 'Straightness', 'N.A'], cols, { fontSize: 6.5 });
-    doc.y = y + 32;
-  }
-
-  private renderVisualSection(doc: InstanceType<typeof PDFDocument>, categories: Array<{ name: string; rules: Array<Record<string, any>> }>) {
-    this.ensurePageSpace(doc, 80, () => this.drawSectionHeader(doc, 'VISUAL INSPECTION'));
-    this.drawSectionHeader(doc, 'VISUAL INSPECTION');
-    const y = doc.y;
-    const cols = [30, 180, 170, this.contentWidth - 380];
-    this.drawRow(doc, y, ['SR', 'TEST', 'REQUIRED', 'OBSERVED'], cols, { bold: true, fontSize: 6.5 });
-    const allRows = this.extractVisualRows(categories);
-    const rowHeight = 18;
-    const reserveBottom = 190; // keep space for remarks + signatures on page 1
-    const availableHeight = 760 - reserveBottom - (y + 14);
-    const maxRows = Math.max(1, Math.floor(availableHeight / rowHeight));
-    const rows = allRows.slice(0, maxRows);
-    rows.forEach((row, index) => {
-      const rowY = y + 14 + index * rowHeight;
-      this.drawWrappedTextRow(
-        doc,
         rowY,
-        [String(index + 1), row.test, row.required, row.observed],
+        [
+          String(row.sr),
+          row.test,
+          row.required,
+          row.observed,
+          row.result,
+        ],
         cols,
-        rowHeight,
+        { fontSize: 6.1 },
       );
     });
-    doc.y = y + 14 + rows.length * rowHeight + 2;
+
+    doc.y = y + 14 + safeRows.length * 12 + 4;
   }
 
-  private renderRemarks(doc: InstanceType<typeof PDFDocument>, status: string) {
+  private renderRemarks(
+    doc: InstanceType<typeof PDFDocument>,
+    status: string,
+    extraRemark?: string,
+  ) {
     this.ensurePageSpace(doc, 64, () => this.drawSectionHeader(doc, 'REMARKS'));
     this.drawSectionHeader(doc, 'REMARKS');
     this.drawCell(
@@ -397,7 +465,8 @@ export class PdfService {
       doc.y,
       this.contentWidth,
       16,
-      'CHEMICAL COMPOSITION AND MECHANICAL PROPERTIES OF THE PRODUCT & DIMENSIONS TESTED AS PER IS 10773:2025 REQUIREMENTS.',
+      extraRemark ??
+        'CHEMICAL COMPOSITION AND MECHANICAL PROPERTIES OF THE PRODUCT & DIMENSIONS TESTED AS PER IS 10773:2025 REQUIREMENTS.',
       { fontSize: 6.1 },
     );
     doc.y += 20;
