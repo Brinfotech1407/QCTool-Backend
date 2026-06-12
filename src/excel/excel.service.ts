@@ -1,41 +1,22 @@
 import { Injectable } from '@nestjs/common';
 import { Workbook, type Worksheet } from 'exceljs';
-
-type CertificateChemicalRow = {
-  sr: number;
-  element: string;
-  requiredMin: string;
-  requiredMax: string;
-  observed: string;
-  result: string;
-};
-
-type CertificateTableRow = {
-  sr: number;
-  test: string;
-  required: string;
-  observed: string;
-  result: string;
-};
-
-type CertificateDimensionRow = CertificateTableRow & {
-  size: string;
-  condition: string;
-  min: string;
-  max: string;
-};
-
-type CertificateSections = {
-  dimensionRows: CertificateDimensionRow[];
-  mechanicalRows: CertificateTableRow[];
-  metallurgicalRows: CertificateTableRow[];
-  remarks: string;
-};
-
-type CategoryShape = {
-  name: string;
-  rules: Array<Record<string, any>>;
-};
+import {
+  CERTIFICATE_COMPANY_NAME,
+  CERTIFICATE_COMPANY_SUBTITLE,
+  CERTIFICATE_COMPANY_TAGLINE,
+  CERTIFICATE_DEFAULT_NDT_ROWS,
+  CERTIFICATE_DEFAULT_REMARK,
+  CERTIFICATE_SECTION_TITLES,
+  CERTIFICATE_TITLE,
+} from '../certificate/certificate.constants';
+import type {
+  CategoryShape,
+  CertificateChemicalRow,
+  CertificateDimensionRow,
+  CertificateItem,
+  CertificateSections,
+  CertificateTableRow,
+} from '../certificate/certificate.types';
 
 type ExcelQcData = {
   id: string;
@@ -48,13 +29,7 @@ type ExcelQcData = {
   customer: {
     name: string;
   };
-  item: {
-    od: number;
-    wt: number;
-    qty?: number;
-    length?: number;
-    condition?: string;
-  };
+  item: Omit<CertificateItem, 'status' | 'categories' | 'certificateSections'>;
   categories: CategoryShape[];
   chemicalComposition?: unknown;
   certificateSections?: CertificateSections;
@@ -73,16 +48,7 @@ type ExcelCustomerTcData = {
   customer: {
     name: string;
   };
-  items: Array<{
-    od: number;
-    wt: number;
-    qty?: number;
-    length?: number;
-    condition?: string;
-    status: string;
-    categories: CategoryShape[];
-    certificateSections?: CertificateSections;
-  }>;
+  items: CertificateItem[];
   chemicalComposition?: unknown;
   certificate?: {
     chemicalRows: CertificateChemicalRow[];
@@ -155,7 +121,7 @@ export class ExcelService {
   private createWorkbook() {
     const workbook = new Workbook();
     workbook.creator = 'QC System';
-    workbook.company = 'Hindalco Industries Limited';
+    workbook.company = CERTIFICATE_COMPANY_NAME;
     workbook.created = new Date();
     return workbook;
   }
@@ -214,8 +180,8 @@ export class ExcelService {
     data.items.forEach((item, index) => {
       row = this.renderItemSummary(sheet, row, item, index + 1);
       row = this.renderDimensionSection(sheet, row, item.certificateSections?.dimensionRows ?? []);
-      row = this.renderTestSection(sheet, row, 'MECHANICAL TEST', item.certificateSections?.mechanicalRows ?? []);
-      row = this.renderTestSection(sheet, row, 'METALLURGICAL TEST', item.certificateSections?.metallurgicalRows ?? [], true);
+      row = this.renderTestSection(sheet, row, CERTIFICATE_SECTION_TITLES.mechanical, item.certificateSections?.mechanicalRows ?? []);
+      row = this.renderTestSection(sheet, row, CERTIFICATE_SECTION_TITLES.metallurgical, item.certificateSections?.metallurgicalRows ?? [], true);
       row = this.renderNdtSection(sheet, row, this.extractVisualRows(item.categories));
     });
 
@@ -228,17 +194,17 @@ export class ExcelService {
     this.mergeAndBorder(sheet, `C${row}:J${row + 2}`);
     this.mergeAndBorder(sheet, `K${row}:L${row + 2}`);
     this.setValue(sheet, `A${row}`, 'LOGO', { bold: true, align: 'center', valign: 'middle' });
-    this.setValue(sheet, `C${row}`, 'HINDALCO INDUSTRIES LIMITED', {
+    this.setValue(sheet, `C${row}`, CERTIFICATE_COMPANY_NAME, {
       bold: true,
       size: 14,
       align: 'center',
     });
-    this.setValue(sheet, `C${row + 1}`, 'Copper Division, Waghodia, Gujarat, India', { align: 'center' });
-    this.setValue(sheet, `C${row + 2}`, 'Manufacturers of Wrought Copper Tubes', { align: 'center' });
+    this.setValue(sheet, `C${row + 1}`, CERTIFICATE_COMPANY_SUBTITLE, { align: 'center' });
+    this.setValue(sheet, `C${row + 2}`, CERTIFICATE_COMPANY_TAGLINE, { align: 'center' });
     this.setValue(sheet, `K${row + 1}`, 'ISO / RoHS', { bold: true, align: 'center' });
 
     this.mergeAndBorder(sheet, `A${row + 4}:L${row + 4}`);
-    this.setValue(sheet, `A${row + 4}`, 'MILL TEST CERTIFICATE', {
+    this.setValue(sheet, `A${row + 4}`, CERTIFICATE_TITLE, {
       bold: true,
       size: 16,
       align: 'center',
@@ -272,7 +238,7 @@ export class ExcelService {
   }
 
   private renderChemicalSection(sheet: Worksheet, row: number, rows: CertificateChemicalRow[]) {
-    row = this.renderSectionHeader(sheet, row, 'CHEMICAL COMPOSITION (%)');
+    row = this.renderSectionHeader(sheet, row, CERTIFICATE_SECTION_TITLES.chemical);
     const headerRow = row;
     this.writeTableRow(sheet, headerRow, ['SR', 'ELEMENT', 'MIN', 'MAX', 'OBSERVED', 'RESULT'], ['A', 'B', 'D', 'F', 'H', 'J'], [1, 3, 5, 7, 9, 11], true);
     const safeRows = rows.length ? rows : [{ sr: 1, element: '-', requiredMin: '-', requiredMax: '-', observed: '-', result: '-' }];
@@ -319,7 +285,7 @@ export class ExcelService {
   }
 
   private renderDimensionSection(sheet: Worksheet, row: number, rows: CertificateDimensionRow[]) {
-    row = this.renderSectionHeader(sheet, row, 'DIMENSIONAL REPORT');
+    row = this.renderSectionHeader(sheet, row, CERTIFICATE_SECTION_TITLES.dimension);
     const headerRow = row;
     this.writeTableRow(sheet, headerRow, ['SR', 'TEST', 'MIN', 'MAX', 'OBSERVED', 'RESULT'], ['A', 'B', 'E', 'G', 'I', 'K'], [1, 4, 6, 8, 10, 12], true);
     const safeRows = rows.length ? rows : [{ sr: 1, test: 'Outside Diameter', min: '-', max: '-', observed: '-', result: '-', required: '-', size: '-', condition: '-' }];
@@ -370,7 +336,7 @@ export class ExcelService {
   }
 
   private renderNdtSection(sheet: Worksheet, row: number, rows: Array<{ test: string; required: string; observed: string }>) {
-    row = this.renderSectionHeader(sheet, row, 'NON-DESTRUCTIVE / VISUAL TESTS');
+    row = this.renderSectionHeader(sheet, row, CERTIFICATE_SECTION_TITLES.ndt);
     const headerRow = row;
     this.writeTableRow(sheet, headerRow, ['SR', 'TEST', 'REQUIRED', 'OBSERVED'], ['A', 'B', 'G', 'J'], [1, 6, 9, 12], true);
     const safeRows = rows.length ? rows : [{ test: '-', required: '-', observed: '-' }];
@@ -391,7 +357,7 @@ export class ExcelService {
   }
 
   private renderRemarks(sheet: Worksheet, row: number, status: string, remarks: string) {
-    row = this.renderSectionHeader(sheet, row, 'REMARKS / DECLARATION');
+    row = this.renderSectionHeader(sheet, row, CERTIFICATE_SECTION_TITLES.remarks);
     this.mergeAndBorder(sheet, `A${row}:K${row}`);
     this.mergeAndBorder(sheet, `L${row}:L${row}`);
     this.setValue(sheet, `A${row}`, `FINAL RESULT: ${status}`, { bold: true, fill: this.headerFill });
@@ -402,7 +368,7 @@ export class ExcelService {
     this.setValue(
       sheet,
       `A${row + 1}`,
-      remarks || 'Test specimen of tubes shall not show any gassing or open grain structure.',
+      remarks || CERTIFICATE_DEFAULT_REMARK,
       { wrapText: true },
     );
     sheet.getRow(row + 1).height = 18;
@@ -551,11 +517,7 @@ export class ExcelService {
       /visual|surface|dent|scratch|clean|eddy|hydro|leak|pneumatic|defect/i.test(row.name),
     );
     if (!filtered.length) {
-      return [
-        { test: 'Freedom From Defects', required: 'As per standard', observed: '-' },
-        { test: 'Hydrostatic Test', required: 'No leakage', observed: '-' },
-        { test: 'Eddy Current Test', required: 'No cracks', observed: '-' },
-      ];
+      return [...CERTIFICATE_DEFAULT_NDT_ROWS];
     }
     return filtered.map((row) => ({
       test: row.name,

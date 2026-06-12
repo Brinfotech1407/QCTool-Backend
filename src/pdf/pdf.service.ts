@@ -2,45 +2,26 @@ import { Injectable } from '@nestjs/common';
 import type { Response } from 'express';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
+import {
+  CERTIFICATE_COMPANY_NAME,
+  CERTIFICATE_COMPANY_SUBTITLE,
+  CERTIFICATE_COMPANY_TAGLINE,
+  CERTIFICATE_DEFAULT_NDT_ROWS,
+  CERTIFICATE_DEFAULT_REMARK,
+  CERTIFICATE_SECTION_TITLES,
+  CERTIFICATE_TITLE,
+} from '../certificate/certificate.constants';
+import type {
+  CategoryShape,
+  CertificateDimensionRow,
+  CertificateChemicalRow,
+  CertificateItem,
+  CertificateSections,
+  CertificateTableRow,
+} from '../certificate/certificate.types';
 
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 const PDFDocument = require('pdfkit');
-
-type CertificateChemicalRow = {
-  sr: number;
-  element: string;
-  requiredMin: string;
-  requiredMax: string;
-  observed: string;
-  result: string;
-};
-
-type CertificateTableRow = {
-  sr: number;
-  test: string;
-  required: string;
-  observed: string;
-  result: string;
-};
-
-type CertificateDimensionRow = CertificateTableRow & {
-  size: string;
-  condition: string;
-  min: string;
-  max: string;
-};
-
-type CertificateSections = {
-  dimensionRows: CertificateDimensionRow[];
-  mechanicalRows: CertificateTableRow[];
-  metallurgicalRows: CertificateTableRow[];
-  remarks: string;
-};
-
-type CategoryShape = {
-  name: string;
-  rules: Array<Record<string, any>>;
-};
 
 type PdfQcData = {
   status: string;
@@ -52,12 +33,7 @@ type PdfQcData = {
   customer: {
     name: string;
   };
-  item: {
-    od: number;
-    wt: number;
-    length?: number;
-    condition?: string;
-  };
+  item: Omit<CertificateItem, 'status' | 'categories' | 'certificateSections'>;
   categories: CategoryShape[];
   chemicalComposition?: unknown;
   certificateSections?: CertificateSections;
@@ -76,16 +52,7 @@ type PdfCustomerTcData = {
   customer: {
     name: string;
   };
-  items: Array<{
-    od: number;
-    wt: number;
-    length?: number;
-    condition?: string;
-    qty?: number;
-    status: string;
-    categories: CategoryShape[];
-    certificateSections?: CertificateSections;
-  }>;
+  items: CertificateItem[];
   chemicalComposition?: unknown;
   certificate?: {
     chemicalRows: CertificateChemicalRow[];
@@ -217,7 +184,7 @@ export class PdfService {
     }
 
     doc.font('Helvetica-Bold').fontSize(11.5).text(
-      'HINDALCO INDUSTRIES LIMITED',
+      CERTIFICATE_COMPANY_NAME,
       this.margin + leftW,
       y + 7,
       {
@@ -226,7 +193,7 @@ export class PdfService {
       },
     );
     doc.font('Helvetica').fontSize(7).text(
-      'Copper Division, Waghodia, Gujarat, India',
+      CERTIFICATE_COMPANY_SUBTITLE,
       this.margin + leftW,
       y + 19,
       {
@@ -235,7 +202,7 @@ export class PdfService {
       },
     );
     doc.fontSize(7).text(
-      'Manufacturers of Wrought Copper Tubes',
+      CERTIFICATE_COMPANY_TAGLINE,
       this.margin + leftW,
       y + 28,
       {
@@ -256,7 +223,7 @@ export class PdfService {
     }
 
     doc.y = y + 50;
-    doc.font('Helvetica-Bold').fontSize(14).text('MILL TEST CERTIFICATE', this.margin, doc.y, {
+    doc.font('Helvetica-Bold').fontSize(14).text(CERTIFICATE_TITLE, this.margin, doc.y, {
       width: this.contentWidth,
       align: 'center',
       underline: true,
@@ -302,7 +269,7 @@ export class PdfService {
     rows: CertificateChemicalRow[],
   ) {
     this.ensurePageSpace(doc, 90);
-    this.drawSectionHeader(doc, 'CHEMICAL COMPOSITION (%)');
+    this.drawSectionHeader(doc, CERTIFICATE_SECTION_TITLES.chemical);
     const cols = [22, 146, 78, 78, 78, this.contentWidth - 402];
     const startY = doc.y;
     this.drawRow(doc, startY, ['SR', 'ELEMENT', 'MIN', 'MAX', 'OBSERVED', 'RESULT'], cols, {
@@ -382,7 +349,7 @@ export class PdfService {
     rows: CertificateDimensionRow[],
   ) {
     this.ensurePageSpace(doc, 88);
-    this.drawSectionHeader(doc, 'DIMENSIONAL REPORT');
+    this.drawSectionHeader(doc, CERTIFICATE_SECTION_TITLES.dimension);
     const cols = [22, 170, 70, 70, 94, this.contentWidth - 426];
     const startY = doc.y;
     this.drawRow(doc, startY, ['SR', 'TEST', 'MIN', 'MAX', 'OBSERVED', 'RESULT'], cols, {
@@ -415,14 +382,14 @@ export class PdfService {
     doc: InstanceType<typeof PDFDocument>,
     rows: CertificateTableRow[],
   ) {
-    this.renderTestSection(doc, 'MECHANICAL TEST', rows);
+    this.renderTestSection(doc, CERTIFICATE_SECTION_TITLES.mechanical, rows);
   }
 
   private renderMetallurgicalSection(
     doc: InstanceType<typeof PDFDocument>,
     rows: CertificateTableRow[],
   ) {
-    this.renderTestSection(doc, 'METALLURGICAL TEST', rows, 15);
+    this.renderTestSection(doc, CERTIFICATE_SECTION_TITLES.metallurgical, rows, 15);
   }
 
   private renderNdtSection(
@@ -430,7 +397,7 @@ export class PdfService {
     rows: Array<{ test: string; required: string; observed: string }>,
   ) {
     this.ensurePageSpace(doc, 72);
-    this.drawSectionHeader(doc, 'NON-DESTRUCTIVE / VISUAL TESTS');
+    this.drawSectionHeader(doc, CERTIFICATE_SECTION_TITLES.ndt);
     const cols = [22, 236, 150, this.contentWidth - 408];
     const startY = doc.y;
     this.drawRow(doc, startY, ['SR', 'TEST', 'REQUIRED', 'OBSERVED'], cols, {
@@ -513,7 +480,7 @@ export class PdfService {
     extraRemark?: string,
   ) {
     this.ensurePageSpace(doc, 76);
-    this.drawSectionHeader(doc, 'REMARKS / DECLARATION');
+    this.drawSectionHeader(doc, CERTIFICATE_SECTION_TITLES.remarks);
     const y = doc.y;
     this.drawBox(doc, this.margin, y, this.contentWidth, 16, this.mutedFill);
     doc.font('Helvetica-Bold').fontSize(6.7).text(
@@ -533,7 +500,7 @@ export class PdfService {
     this.drawBox(doc, this.margin, y + 16, this.contentWidth, 22);
     doc.font('Helvetica').fontSize(6.2).text(
       extraRemark ||
-        'Test specimen of tubes shall not show any gassing or open grain structure.',
+        CERTIFICATE_DEFAULT_REMARK,
       this.margin + 4,
       y + 19,
       { width: this.contentWidth - 8, align: 'left' },
@@ -711,11 +678,7 @@ export class PdfService {
       /visual|surface|dent|scratch|clean|eddy|hydro|leak|pneumatic|defect/i.test(row.name),
     );
     if (!filtered.length) {
-      return [
-        { test: 'Freedom From Defects', required: 'As per standard', observed: '-' },
-        { test: 'Hydrostatic Test', required: 'No leakage', observed: '-' },
-        { test: 'Eddy Current Test', required: 'No cracks', observed: '-' },
-      ];
+      return [...CERTIFICATE_DEFAULT_NDT_ROWS];
     }
     return filtered.map((row) => ({
       test: row.name,

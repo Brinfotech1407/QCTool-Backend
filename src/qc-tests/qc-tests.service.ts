@@ -5,6 +5,8 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { RuleType, UserRole } from '@prisma/client';
+import { CERTIFICATE_DEFAULT_REMARK } from '../certificate/certificate.constants';
+import type { CertificateChemicalRow, CertificateDimensionRow, CertificateSections } from '../certificate/certificate.types';
 import { PrismaService } from '../prisma/prisma.service';
 import { RuleEngineService } from '../rule-engine/rule-engine.service';
 import { CreateQCTestDto } from './dto/create-qc-test.dto';
@@ -47,37 +49,6 @@ type CustomerTcData = {
     chemicalRows: CertificateChemicalRow[];
     remarks: string;
   };
-};
-
-type CertificateChemicalRow = {
-  sr: number;
-  element: string;
-  requiredMin: string;
-  requiredMax: string;
-  observed: string;
-  result: string;
-};
-
-type CertificateTableRow = {
-  sr: number;
-  test: string;
-  required: string;
-  observed: string;
-  result: string;
-};
-
-type CertificateDimensionRow = CertificateTableRow & {
-  size: string;
-  condition: string;
-  min: string;
-  max: string;
-};
-
-type CertificateSections = {
-  dimensionRows: CertificateDimensionRow[];
-  mechanicalRows: CertificateTableRow[];
-  metallurgicalRows: CertificateTableRow[];
-  remarks: string;
 };
 
 type BatchWithNestedItems = {
