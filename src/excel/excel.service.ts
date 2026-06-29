@@ -1,4 +1,6 @@
 import { Injectable } from '@nestjs/common';
+import * as fs from 'node:fs';
+import * as path from 'node:path';
 import { Workbook, type Worksheet } from 'exceljs';
 import {
   CERTIFICATE_COMPANY_NAME,
@@ -9,6 +11,7 @@ import {
   CERTIFICATE_SECTION_TITLES,
   CERTIFICATE_TITLE,
 } from '../certificate/certificate.constants';
+import { formatObservedValue, getIsoDeclarationText } from '../certificate/certificate.display';
 import type {
   CategoryShape,
   CertificateChemicalRow,
@@ -37,6 +40,11 @@ type ExcelQcData = {
     chemicalRows: CertificateChemicalRow[];
     remarks: string;
   };
+  tcConfig?: {
+    companyName: string;
+    logoUrl?: string | null;
+    isoHallmarkUrl?: string | null;
+  } | null;
 };
 
 type ExcelCustomerTcData = {
@@ -54,6 +62,11 @@ type ExcelCustomerTcData = {
     chemicalRows: CertificateChemicalRow[];
     remarks: string;
   };
+  tcConfig?: {
+    companyName: string;
+    logoUrl?: string | null;
+    isoHallmarkUrl?: string | null;
+  } | null;
 };
 
 @Injectable()
@@ -62,6 +75,8 @@ export class ExcelService {
   private readonly headerFill = 'FFF7F7F7';
   private readonly passFill = 'FFC6EFCE';
   private readonly failFill = 'FFFFC7CE';
+  private readonly logoPath = path.join(process.cwd(), 'src', 'assets', 'logo.png');
+  private readonly isoLogoPath = path.join(process.cwd(), 'src', 'assets', 'iso.png');
   private readonly border = {
     top: { style: 'thin' as const },
     left: { style: 'thin' as const },
@@ -84,6 +99,7 @@ export class ExcelService {
       overallStatus: qcData.status || 'PASS',
       chemicalRows: qcData.certificate?.chemicalRows ?? [],
       remarks: qcData.certificateSections?.remarks ?? qcData.certificate?.remarks ?? '',
+      tcConfig: qcData.tcConfig ?? null,
       items: [
         {
           ...qcData.item,
@@ -112,6 +128,7 @@ export class ExcelService {
       overallStatus: tcData.items.some((item) => item.status === 'FAIL') ? 'FAIL' : 'PASS',
       chemicalRows: tcData.certificate?.chemicalRows ?? [],
       remarks: tcData.certificate?.remarks ?? tcData.items[0]?.certificateSections?.remarks ?? '',
+      tcConfig: tcData.tcConfig ?? null,
       items: tcData.items,
     });
 
@@ -160,6 +177,11 @@ export class ExcelService {
       overallStatus: string;
       chemicalRows: CertificateChemicalRow[];
       remarks: string;
+      tcConfig?: {
+        companyName: string;
+        logoUrl?: string | null;
+        isoHallmarkUrl?: string | null;
+      } | null;
       items: Array<{
         od: number;
         wt: number;
@@ -173,7 +195,7 @@ export class ExcelService {
     },
   ) {
     let row = 1;
-    row = this.renderHeader(sheet, row);
+    row = this.renderHeader(sheet, row, data.tcConfig ?? null);
     row = this.renderInfoGrid(sheet, row, data);
     row = this.renderChemicalSection(sheet, row, data.chemicalRows);
 
@@ -189,19 +211,55 @@ export class ExcelService {
     this.renderSignatureSection(sheet, row);
   }
 
-  private renderHeader(sheet: Worksheet, row: number) {
+  private renderHeader(
+    sheet: Worksheet,
+    row: number,
+    tcConfig?: {
+      companyName: string;
+      logoUrl?: string | null;
+      isoHallmarkUrl?: string | null;
+    } | null,
+  ) {
     this.mergeAndBorder(sheet, `A${row}:B${row + 2}`);
     this.mergeAndBorder(sheet, `C${row}:J${row + 2}`);
     this.mergeAndBorder(sheet, `K${row}:L${row + 2}`);
-    this.setValue(sheet, `A${row}`, 'LOGO', { bold: true, align: 'center', valign: 'middle' });
-    this.setValue(sheet, `C${row}`, CERTIFICATE_COMPANY_NAME, {
+    const logoImageId = this.addWorkbookImage(
+      sheet.workbook,
+      tcConfig?.logoUrl,
+      this.logoPath,
+    );
+    if (logoImageId) {
+      sheet.addImage(logoImageId, {
+        tl: { col: 0.2, row: row - 0.85 },
+        ext: { width: 70, height: 42 },
+      });
+    } else {
+      this.setValue(sheet, `A${row}`, 'LOGO', {
+        bold: true,
+        align: 'center',
+        valign: 'middle',
+      });
+    }
+    this.setValue(sheet, `C${row}`, tcConfig?.companyName || CERTIFICATE_COMPANY_NAME, {
       bold: true,
       size: 14,
       align: 'center',
     });
     this.setValue(sheet, `C${row + 1}`, CERTIFICATE_COMPANY_SUBTITLE, { align: 'center' });
     this.setValue(sheet, `C${row + 2}`, CERTIFICATE_COMPANY_TAGLINE, { align: 'center' });
-    this.setValue(sheet, `K${row + 1}`, 'ISO / RoHS', { bold: true, align: 'center' });
+    const isoImageId = this.addWorkbookImage(
+      sheet.workbook,
+      tcConfig?.isoHallmarkUrl,
+      this.isoLogoPath,
+    );
+    if (isoImageId) {
+      sheet.addImage(isoImageId, {
+        tl: { col: 10.1, row: row - 0.8 },
+        ext: { width: 58, height: 26 },
+      });
+    } else {
+      this.setValue(sheet, `K${row + 1}`, 'ISO / RoHS', { bold: true, align: 'center' });
+    }
 
     this.mergeAndBorder(sheet, `A${row + 4}:L${row + 4}`);
     this.setValue(sheet, `A${row + 4}`, CERTIFICATE_TITLE, {
@@ -248,7 +306,7 @@ export class ExcelService {
       this.writeTableRow(
         sheet,
         currentRow,
-        [String(entry.sr), entry.element, entry.requiredMin, entry.requiredMax, entry.observed, entry.result],
+        [String(entry.sr), entry.element, entry.requiredMin, entry.requiredMax, formatObservedValue(entry.observed, CERTIFICATE_SECTION_TITLES.chemical), entry.result],
         ['A', 'B', 'D', 'F', 'H', 'J'],
         [1, 3, 5, 7, 9, 11],
       );
@@ -295,7 +353,7 @@ export class ExcelService {
       this.writeTableRow(
         sheet,
         currentRow,
-        [String(entry.sr), entry.test, entry.min, entry.max, entry.observed, entry.result],
+        [String(entry.sr), entry.test, entry.min, entry.max, formatObservedValue(entry.observed, CERTIFICATE_SECTION_TITLES.dimension), entry.result],
         ['A', 'B', 'E', 'G', 'I', 'K'],
         [1, 4, 6, 8, 10, 12],
       );
@@ -322,7 +380,7 @@ export class ExcelService {
       this.writeTableRow(
         sheet,
         currentRow,
-        [String(entry.sr), entry.test, entry.required, entry.observed, entry.result],
+        [String(entry.sr), entry.test, entry.required, formatObservedValue(entry.observed, title), entry.result],
         ['A', 'B', 'F', 'I', 'K'],
         [1, 5, 8, 10, 12],
       );
@@ -346,7 +404,7 @@ export class ExcelService {
       this.writeTableRow(
         sheet,
         currentRow,
-        [String(index + 1), entry.test, entry.required, entry.observed],
+        [String(index + 1), entry.test, entry.required, formatObservedValue(entry.observed, CERTIFICATE_SECTION_TITLES.ndt)],
         ['A', 'B', 'G', 'J'],
         [1, 6, 9, 12],
       );
@@ -361,28 +419,20 @@ export class ExcelService {
     this.mergeAndBorder(sheet, `A${row}:K${row}`);
     this.mergeAndBorder(sheet, `L${row}:L${row}`);
     this.setValue(sheet, `A${row}`, `FINAL RESULT: ${status}`, { bold: true, fill: this.headerFill });
-    this.setValue(sheet, `L${row}`, status, { bold: true, align: 'center', fill: this.headerFill });
-    this.colorResultCell(sheet.getCell(`L${row}`), status);
+    // this.setValue(sheet, `L${row}`, status, { bold: true, align: 'center', fill: this.headerFill });
+    // this.colorResultCell(sheet.getCell(`L${row}`), status);
 
     this.mergeAndBorder(sheet, `A${row + 1}:L${row + 2}`);
     this.setValue(
       sheet,
       `A${row + 1}`,
-      remarks || CERTIFICATE_DEFAULT_REMARK,
+      getIsoDeclarationText(),
       { wrapText: true },
     );
     sheet.getRow(row + 1).height = 18;
     sheet.getRow(row + 2).height = 18;
 
-    this.mergeAndBorder(sheet, `A${row + 3}:L${row + 4}`);
-    this.setValue(
-      sheet,
-      `A${row + 3}`,
-      'We hereby certify that the material described herein has been manufactured, sampled, tested and inspected in accordance with IS 10773:2025.',
-      { align: 'center', wrapText: true },
-    );
-
-    return row + 6;
+    return row + 4;
   }
 
   private renderSignatureSection(sheet: Worksheet, row: number) {
@@ -522,8 +572,41 @@ export class ExcelService {
     return filtered.map((row) => ({
       test: row.name,
       required: row.spec || 'As per standard',
-      observed: `${row.observed} (${row.status})`,
+      observed: formatObservedValue(row.observed, CERTIFICATE_SECTION_TITLES.ndt),
     }));
+  }
+
+  private addWorkbookImage(
+    workbook: Workbook,
+    value: string | null | undefined,
+    fallbackPath: string,
+  ) {
+    const normalized = String(value ?? '').trim();
+
+    if (normalized.startsWith('data:image/')) {
+      return workbook.addImage({
+        base64: normalized,
+        extension: this.getImageExtensionFromDataUrl(normalized),
+      });
+    }
+
+    const sourcePath = normalized && fs.existsSync(normalized) ? normalized : fallbackPath;
+    if (!fs.existsSync(sourcePath)) {
+      return null;
+    }
+
+    return workbook.addImage({
+      filename: sourcePath,
+      extension: this.getImageExtensionFromPath(sourcePath),
+    });
+  }
+
+  private getImageExtensionFromDataUrl(dataUrl: string): 'png' | 'jpeg' {
+    return /data:image\/jpe?g/i.test(dataUrl) ? 'jpeg' : 'png';
+  }
+
+  private getImageExtensionFromPath(filePath: string): 'png' | 'jpeg' {
+    return /\.jpe?g$/i.test(filePath) ? 'jpeg' : 'png';
   }
 
   private expandRuleRows(rule: any) {

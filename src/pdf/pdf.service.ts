@@ -11,6 +11,7 @@ import {
   CERTIFICATE_SECTION_TITLES,
   CERTIFICATE_TITLE,
 } from '../certificate/certificate.constants';
+import { formatObservedValue, getIsoDeclarationText } from '../certificate/certificate.display';
 import type {
   CategoryShape,
   CertificateDimensionRow,
@@ -41,6 +42,11 @@ type PdfQcData = {
     chemicalRows: CertificateChemicalRow[];
     remarks: string;
   };
+  tcConfig?: {
+    companyName: string;
+    logoUrl?: string | null;
+    isoHallmarkUrl?: string | null;
+  } | null;
 };
 
 type PdfCustomerTcData = {
@@ -58,10 +64,16 @@ type PdfCustomerTcData = {
     chemicalRows: CertificateChemicalRow[];
     remarks: string;
   };
+  tcConfig?: {
+    companyName: string;
+    logoUrl?: string | null;
+    isoHallmarkUrl?: string | null;
+  } | null;
 };
 
 @Injectable()
 export class PdfService {
+  private currentTcConfig: { companyName: string; logoUrl?: string | null; isoHallmarkUrl?: string | null } | null = null;
   private readonly margin = 18;
   private readonly pageWidth = 595.28;
   private readonly pageHeight = 841.89;
@@ -89,6 +101,7 @@ export class PdfService {
       overallStatus: qcData.status,
       chemicalRows: qcData.certificate?.chemicalRows ?? [],
       remarks: qcData.certificateSections?.remarks ?? qcData.certificate?.remarks ?? '',
+      tcConfig: qcData.tcConfig ?? null,
       items: [item],
     });
 
@@ -108,6 +121,7 @@ export class PdfService {
       overallStatus: tcData.items.some((item) => item.status === 'FAIL') ? 'FAIL' : 'PASS',
       chemicalRows: tcData.certificate?.chemicalRows ?? [],
       remarks: tcData.certificate?.remarks ?? tcData.items[0]?.certificateSections?.remarks ?? '',
+      tcConfig: tcData.tcConfig ?? null,
       items: tcData.items,
     });
 
@@ -133,6 +147,11 @@ export class PdfService {
       overallStatus: string;
       chemicalRows: CertificateChemicalRow[];
       remarks: string;
+      tcConfig?: {
+        companyName: string;
+        logoUrl?: string | null;
+        isoHallmarkUrl?: string | null;
+      } | null;
       items: Array<{
         od: number;
         wt: number;
@@ -145,12 +164,14 @@ export class PdfService {
       }>;
     },
   ) {
+    this.currentTcConfig = data.tcConfig ?? null;
+
     if (!doc.page) {
       doc.addPage();
       doc.y = this.margin;
     }
 
-    this.renderBrandHeader(doc);
+    this.renderBrandHeader(doc, this.currentTcConfig);
     this.renderTopInfoGrid(doc, data);
     this.renderChemicalSection(doc, data.chemicalRows);
     data.items.forEach((item, index) => {
@@ -164,7 +185,10 @@ export class PdfService {
     this.renderSignatureSection(doc);
   }
 
-  private renderBrandHeader(doc: InstanceType<typeof PDFDocument>) {
+  private renderBrandHeader(
+    doc: InstanceType<typeof PDFDocument>,
+    tcConfig?: { companyName: string; logoUrl?: string | null; isoHallmarkUrl?: string | null } | null,
+  ) {
     const y = doc.y;
     const leftW = 74;
     const rightW = 74;
@@ -175,8 +199,9 @@ export class PdfService {
     this.drawBox(doc, this.margin + leftW, y, centerW, 46);
     this.drawBox(doc, this.margin + leftW + centerW, y, rightW, 46);
 
-    if (fs.existsSync(this.logoPath)) {
-      doc.image(this.logoPath, this.margin + 8, y + 6, {
+    const logoSource = this.resolvePdfImageSource(tcConfig?.logoUrl, this.logoPath);
+    if (logoSource) {
+      doc.image(logoSource, this.margin + 8, y + 6, {
         fit: [54, 30],
         align: 'center',
         valign: 'center',
@@ -184,7 +209,7 @@ export class PdfService {
     }
 
     doc.font('Helvetica-Bold').fontSize(11.5).text(
-      CERTIFICATE_COMPANY_NAME,
+      tcConfig?.companyName || CERTIFICATE_COMPANY_NAME,
       this.margin + leftW,
       y + 7,
       {
@@ -211,8 +236,9 @@ export class PdfService {
       },
     );
 
-    if (fs.existsSync(this.isoLogoPath)) {
-      doc.image(this.isoLogoPath, this.margin + leftW + centerW + 8, y + 6, {
+    const isoSource = this.resolvePdfImageSource(tcConfig?.isoHallmarkUrl, this.isoLogoPath);
+    if (isoSource) {
+      doc.image(isoSource, this.margin + leftW + centerW + 8, y + 6, {
         fit: [26, 12],
       });
     }
@@ -291,7 +317,7 @@ export class PdfService {
           row.element,
           row.requiredMin,
           row.requiredMax,
-          row.observed,
+          formatObservedValue(row.observed, CERTIFICATE_SECTION_TITLES.chemical),
           row.result,
         ],
         cols,
@@ -366,7 +392,7 @@ export class PdfService {
       this.drawRow(
         doc,
         startY + 12 + index * 11,
-        [String(row.sr), row.test, row.min, row.max, row.observed, row.result],
+        [String(row.sr), row.test, row.min, row.max, formatObservedValue(row.observed, CERTIFICATE_SECTION_TITLES.dimension), row.result],
         cols,
         {
           fontSize: 6.1,
@@ -414,7 +440,7 @@ export class PdfService {
       this.drawTallRow(
         doc,
         startY + 12 + index * 14,
-        [String(index + 1), row.test, row.required, row.observed],
+        [String(index + 1), row.test, row.required, 'Satisfactory'],
         cols,
         14,
       );
@@ -449,7 +475,7 @@ export class PdfService {
         this.drawTallRow(
           doc,
           rowY,
-          [String(row.sr), row.test, row.required, row.observed, row.result],
+          [String(row.sr), row.test, row.required, formatObservedValue(row.observed, title), row.result],
           cols,
           rowHeight,
           {
@@ -461,7 +487,7 @@ export class PdfService {
         this.drawRow(
           doc,
           rowY,
-          [String(row.sr), row.test, row.required, row.observed, row.result],
+          [String(row.sr), row.test, row.required, formatObservedValue(row.observed, title), row.result],
           cols,
           {
             fontSize: 6.1,
@@ -489,30 +515,29 @@ export class PdfService {
       y + 4,
       { width: this.contentWidth - 8, align: 'left' },
     );
-    doc.fillColor(status === 'FAIL' ? '#A30000' : '#0E6B36').text(
-      status,
-      this.margin + this.contentWidth - 70,
-      y + 4,
-      { width: 60, align: 'right' },
-    );
+    // doc.fillColor(status === 'FAIL' ? '#A30000' : '#0E6B36').text(
+    //   status,
+    //   this.margin + this.contentWidth - 70,
+    //   y + 4,
+    //   { width: 60, align: 'right' },
+    // );
     doc.fillColor('#000000');
 
     this.drawBox(doc, this.margin, y + 16, this.contentWidth, 22);
     doc.font('Helvetica').fontSize(6.2).text(
-      extraRemark ||
-        CERTIFICATE_DEFAULT_REMARK,
+      getIsoDeclarationText(),
       this.margin + 4,
       y + 19,
       { width: this.contentWidth - 8, align: 'left' },
     );
 
-    this.drawBox(doc, this.margin, y + 38, this.contentWidth, 18);
-    doc.fontSize(6.2).text(
-      'We hereby certify that the material described herein has been manufactured, sampled, tested and inspected in accordance with IS 10773:2025.',
-      this.margin + 4,
-      y + 44,
-      { width: this.contentWidth - 8, align: 'center' },
-    );
+    //this.drawBox(doc, this.margin, y + 38, this.contentWidth, 18);
+    // doc.fontSize(6.2).text(
+    //   extraRemark || CERTIFICATE_DEFAULT_REMARK,
+    //   this.margin + 4,
+    //   y + 44,
+    //   { width: this.contentWidth - 8, align: 'center' },
+    // );
 
     doc.y = y + 50;
   }
@@ -659,7 +684,7 @@ export class PdfService {
     if (doc.y + required > this.pageHeight - 54) {
       doc.addPage();
       doc.y = this.margin;
-      this.renderBrandHeader(doc);
+      this.renderBrandHeader(doc, this.currentTcConfig);
     }
   }
 
@@ -668,6 +693,30 @@ export class PdfService {
     if (normalized === 'PASS') return '#0E6B36';
     if (normalized === 'FAIL') return '#A30000';
     return '#000000';
+  }
+
+  private resolvePdfImageSource(
+    value: string | null | undefined,
+    fallbackPath: string,
+  ): string | Buffer | undefined {
+    const normalized = String(value ?? '').trim();
+
+    if (normalized.startsWith('data:image/')) {
+      const base64 = normalized.split(',')[1];
+      if (base64) {
+        return Buffer.from(base64, 'base64');
+      }
+    }
+
+    if (normalized && fs.existsSync(normalized)) {
+      return normalized;
+    }
+
+    if (fs.existsSync(fallbackPath)) {
+      return fallbackPath;
+    }
+
+    return undefined;
   }
 
   private extractVisualRows(categories: CategoryShape[]) {
@@ -683,7 +732,7 @@ export class PdfService {
     return filtered.map((row) => ({
       test: row.name,
       required: row.spec || 'As per standard',
-      observed: `${row.observed} (${row.status})`,
+      observed: formatObservedValue(row.observed, CERTIFICATE_SECTION_TITLES.ndt),
     }));
   }
 

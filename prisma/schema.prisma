@@ -60,7 +60,9 @@ model Company {
   hits        HitEntry[]
   batches     Batch[]
   testConfigs CompanyTestConfig[]
+  tcConfig CompanyTcConfig?
 }
+
 
 model User {
   id       String   @id @default(uuid())
@@ -273,6 +275,18 @@ model CompanyTestConfig {
   @@unique([companyId, categoryId, sequence])
   @@index([companyId, standardId])
   @@index([companyId, categoryId])
+}
+
+model CompanyTcConfig {
+  id             String   @id @default(uuid())
+  companyId      String   @unique
+  companyName    String
+  logoUrl        String?
+  isoHallmarkUrl String?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  company Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
 }
 
 model TestParameter {

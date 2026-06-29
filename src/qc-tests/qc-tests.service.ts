@@ -17,6 +17,12 @@ type JwtUser = {
   companyId: string | null;
 };
 
+type CompanyTcConfigPayload = {
+  companyName: string;
+  logoUrl?: string | null;
+  isoHallmarkUrl?: string | null;
+};
+
 type CustomerTcData = {
   batch: {
     id: string;
@@ -49,6 +55,7 @@ type CustomerTcData = {
     chemicalRows: CertificateChemicalRow[];
     remarks: string;
   };
+  tcConfig?: CompanyTcConfigPayload | null;
 };
 
 type BatchWithNestedItems = {
@@ -548,6 +555,10 @@ export class QcTestsService {
       ),
     );
 
+    const tcConfig = await (this.prisma as any).companyTcConfig.findUnique({
+      where: { companyId: batch.companyId },
+    });
+
     return {
       batch: {
         ...batch,
@@ -667,6 +678,9 @@ export class QcTestsService {
       chemicalComposition,
       qcTest.batch.grade || qcTest.batch.gradeId,
     );
+    const tcConfig = await (this.prisma as any).companyTcConfig.findUnique({
+      where: { companyId: qcTest.batch.companyId },
+    });
 
     return {
       id: qcTest.id,
@@ -714,6 +728,7 @@ export class QcTestsService {
         chemicalRows,
         remarks: this.getCertificateRemark(),
       },
+      tcConfig,
     };
   }
 
@@ -853,6 +868,10 @@ export class QcTestsService {
       throw new NotFoundException('No QC records available for this customer in selected batch');
     }
 
+    const tcConfig = await (this.prisma as any).companyTcConfig.findUnique({
+      where: { companyId: batch.companyId },
+    });
+
     return {
       batch: {
         id: batch.id,
@@ -878,6 +897,7 @@ export class QcTestsService {
         ),
         remarks: this.getCertificateRemark(),
       },
+      tcConfig,
     };
   }
 
@@ -1007,11 +1027,21 @@ export class QcTestsService {
         result: row.result,
       }));
 
+    const metallurgicalCategoryNames = new Set(
+      categories
+        .filter((category) => /metall|metalog|microscopic/i.test(category.name))
+        .map((category) => this.normalizeCertificateKey(category.name)),
+    );
     const metallurgicalRows = rows
+      .filter((row) => this.isMetallurgicalCertificateRow(row, metallurgicalCategoryNames))
       .filter(
-        (row) =>
-          /grain/i.test(row.test) ||
-          /metallurgical|microscopic/i.test(row.categoryName),
+        (row, index, list) =>
+          list.findIndex(
+            (candidate) =>
+              candidate.test === row.test &&
+              candidate.required === row.required &&
+              candidate.observed === row.observed,
+          ) === index,
       )
       .map((row, index) => ({
         sr: index + 1,
@@ -1345,6 +1375,22 @@ export class QcTestsService {
       return '-';
     }
     return String(value);
+  }
+
+  private isMetallurgicalCertificateRow(
+    row: ReturnType<typeof this.expandCertificateRuleRows>[number],
+    categoryNames: Set<string>,
+  ) {
+    const normalizedCategory = this.normalizeCertificateKey(row.categoryName);
+    const normalizedTest = String(row.test ?? '').trim().toLowerCase();
+
+    if (categoryNames.has(normalizedCategory)) {
+      return true;
+    }
+
+    return /grain|microscopic|metallurgical|metalog|residue|solvent|gassing|open grain/i.test(
+      normalizedTest,
+    );
   }
 
   private normalizeCertificateKey(value: string) {
