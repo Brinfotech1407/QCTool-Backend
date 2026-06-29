@@ -28,6 +28,7 @@ type ExcelQcData = {
     batchNumber: string;
     grade?: string;
     gradeId?: string;
+    tubeType?: string;
   };
   customer: {
     name: string;
@@ -42,6 +43,7 @@ type ExcelQcData = {
   };
   tcConfig?: {
     companyName: string;
+    companyAddress?: string | null;
     logoUrl?: string | null;
     isoHallmarkUrl?: string | null;
   } | null;
@@ -52,6 +54,7 @@ type ExcelCustomerTcData = {
     batchNumber: string;
     grade?: string;
     gradeId?: string;
+    tubeType?: string;
   };
   customer: {
     name: string;
@@ -64,6 +67,7 @@ type ExcelCustomerTcData = {
   };
   tcConfig?: {
     companyName: string;
+    companyAddress?: string | null;
     logoUrl?: string | null;
     isoHallmarkUrl?: string | null;
   } | null;
@@ -95,6 +99,7 @@ export class ExcelService {
     this.renderCertificateSheet(sheet, {
       batchNumber: qcData.batch.batchNumber,
       grade: qcData.batch.grade || qcData.batch.gradeId || '-',
+      tubeType: qcData.batch.tubeType || 'Smooth Copper Tube',
       customer: qcData.customer.name,
       overallStatus: qcData.status || 'PASS',
       chemicalRows: qcData.certificate?.chemicalRows ?? [],
@@ -124,6 +129,7 @@ export class ExcelService {
     this.renderCertificateSheet(sheet, {
       batchNumber: tcData.batch.batchNumber,
       grade: tcData.batch.grade || tcData.batch.gradeId || '-',
+      tubeType: tcData.batch.tubeType || 'Smooth Copper Tube',
       customer: tcData.customer.name,
       overallStatus: tcData.items.some((item) => item.status === 'FAIL') ? 'FAIL' : 'PASS',
       chemicalRows: tcData.certificate?.chemicalRows ?? [],
@@ -173,12 +179,14 @@ export class ExcelService {
     data: {
       batchNumber: string;
       grade: string;
+      tubeType: string;
       customer: string;
       overallStatus: string;
       chemicalRows: CertificateChemicalRow[];
       remarks: string;
       tcConfig?: {
         companyName: string;
+        companyAddress?: string | null;
         logoUrl?: string | null;
         isoHallmarkUrl?: string | null;
       } | null;
@@ -216,6 +224,7 @@ export class ExcelService {
     row: number,
     tcConfig?: {
       companyName: string;
+      companyAddress?: string | null;
       logoUrl?: string | null;
       isoHallmarkUrl?: string | null;
     } | null,
@@ -245,7 +254,7 @@ export class ExcelService {
       size: 14,
       align: 'center',
     });
-    this.setValue(sheet, `C${row + 1}`, CERTIFICATE_COMPANY_SUBTITLE, { align: 'center' });
+    this.setValue(sheet, `C${row + 1}`, tcConfig?.companyAddress || CERTIFICATE_COMPANY_SUBTITLE, { align: 'center' });
     this.setValue(sheet, `C${row + 2}`, CERTIFICATE_COMPANY_TAGLINE, { align: 'center' });
     const isoImageId = this.addWorkbookImage(
       sheet.workbook,
@@ -275,18 +284,18 @@ export class ExcelService {
   private renderInfoGrid(
     sheet: Worksheet,
     row: number,
-    data: { batchNumber: string; grade: string; customer: string },
+    data: { batchNumber: string; grade: string; tubeType: string; customer: string },
   ) {
     const rows = [
-      ['TC NO', `QC-${data.batchNumber}`, 'DATE', new Date().toLocaleDateString()],
-      ['M/S.', data.customer || '-', 'P.O. / INV.', '-'],
-      ['PRODUCT', 'WROUGHT COPPER TUBES FOR REFRIGERATION AND AIR CONDITIONING PURPOSES', 'BATCH NO.', data.batchNumber],
-      ['SPECIFICATION', 'IS 10773:2025', 'GRADE', data.grade || '-'],
+      ['TC NO', `QC-${data.batchNumber}`, 'DATE', new Date().toLocaleDateString(), 'BATCH NO.', data.batchNumber],
+      ['M/S.', data.customer || '-', 'P.O. / INV.', '-', '', ''],
+      ['PRODUCT', data.tubeType || 'Smooth Copper Tube', '', '', '', ''],
+      ['SPECIFICATION', 'IS 10773:2025', 'GRADE', data.grade || '-', '', ''],
     ];
 
     rows.forEach((values, index) => {
       const currentRow = row + index;
-      this.writeGridRow(sheet, currentRow, values, [1, 3, 7, 9], [2, 6, 8, 12], index === 2 ? 24 : 18);
+      this.writeGridRow(sheet, currentRow, values, [1, 2, 7, 8, 10, 11], [1, 6, 7, 9, 10, 12], index === 2 ? 24 : 18);
       if (index === 2) {
         sheet.getCell(`B${currentRow}`).alignment = { vertical: 'middle', horizontal: 'left', wrapText: true };
       }

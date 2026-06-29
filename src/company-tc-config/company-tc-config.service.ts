@@ -25,11 +25,13 @@ export class CompanyTcConfigService {
       create: {
         companyId,
         companyName: dto.companyName,
+        companyAddress: dto.companyAddress || null,
         logoUrl: dto.logoUrl || null,
         isoHallmarkUrl: dto.isoHallmarkUrl || null,
       },
       update: {
         companyName: dto.companyName,
+        companyAddress: dto.companyAddress || null,
         logoUrl: dto.logoUrl || null,
         isoHallmarkUrl: dto.isoHallmarkUrl || null,
       },

@@ -92,13 +92,15 @@ export class BatchService {
     }
 
     try {
-      return await this.prisma.$transaction(async (tx) => {
-        const transaction = tx as unknown as BatchTransaction;
+      return await this.prisma.$transaction(
+        async (tx) => {
+          const transaction = tx as unknown as BatchTransaction;
 
         const batch = await transaction.batch.create({
           data: {
             batchNumber: dto.batchNumber,
             grade: dto.grade,
+            tubeType: dto.tubeType,
             totalQty: dto.totalQty,
             gradeId: dto.grade,
             requiredQuantity: dto.totalQty,
@@ -210,11 +212,16 @@ export class BatchService {
           }
         }
 
-        return {
-          ...(batch as Record<string, unknown>),
-          attachedTestCount: configs.length,
-        };
-      });
+          return {
+            ...(batch as Record<string, unknown>),
+            attachedTestCount: configs.length,
+          };
+        },
+        {
+          maxWait: 10_000,
+          timeout: 20_000,
+        },
+      );
     } catch (error) {
       if (
         error instanceof Prisma.PrismaClientKnownRequestError &&

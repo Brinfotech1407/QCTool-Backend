@@ -30,6 +30,7 @@ type PdfQcData = {
     batchNumber: string;
     grade?: string;
     gradeId?: string;
+    tubeType?: string;
   };
   customer: {
     name: string;
@@ -44,6 +45,7 @@ type PdfQcData = {
   };
   tcConfig?: {
     companyName: string;
+    companyAddress?: string | null;
     logoUrl?: string | null;
     isoHallmarkUrl?: string | null;
   } | null;
@@ -54,6 +56,7 @@ type PdfCustomerTcData = {
     batchNumber: string;
     grade?: string;
     gradeId?: string;
+    tubeType?: string;
   };
   customer: {
     name: string;
@@ -66,6 +69,7 @@ type PdfCustomerTcData = {
   };
   tcConfig?: {
     companyName: string;
+    companyAddress?: string | null;
     logoUrl?: string | null;
     isoHallmarkUrl?: string | null;
   } | null;
@@ -97,6 +101,7 @@ export class PdfService {
     this.renderCertificatePage(doc, {
       batchNumber: qcData.batch.batchNumber,
       grade: qcData.batch.grade || qcData.batch.gradeId || '-',
+      tubeType: qcData.batch.tubeType || 'Smooth Copper Tube',
       customer: qcData.customer.name,
       overallStatus: qcData.status,
       chemicalRows: qcData.certificate?.chemicalRows ?? [],
@@ -117,6 +122,7 @@ export class PdfService {
     this.renderCertificatePage(doc, {
       batchNumber: tcData.batch.batchNumber,
       grade: tcData.batch.grade || tcData.batch.gradeId || '-',
+      tubeType: tcData.batch.tubeType || 'Smooth Copper Tube',
       customer: tcData.customer.name,
       overallStatus: tcData.items.some((item) => item.status === 'FAIL') ? 'FAIL' : 'PASS',
       chemicalRows: tcData.certificate?.chemicalRows ?? [],
@@ -143,12 +149,14 @@ export class PdfService {
     data: {
       batchNumber: string;
       grade: string;
+      tubeType: string;
       customer: string;
       overallStatus: string;
       chemicalRows: CertificateChemicalRow[];
       remarks: string;
       tcConfig?: {
         companyName: string;
+        companyAddress?: string | null;
         logoUrl?: string | null;
         isoHallmarkUrl?: string | null;
       } | null;
@@ -187,7 +195,12 @@ export class PdfService {
 
   private renderBrandHeader(
     doc: InstanceType<typeof PDFDocument>,
-    tcConfig?: { companyName: string; logoUrl?: string | null; isoHallmarkUrl?: string | null } | null,
+    tcConfig?: {
+      companyName: string;
+      companyAddress?: string | null;
+      logoUrl?: string | null;
+      isoHallmarkUrl?: string | null;
+    } | null,
   ) {
     const y = doc.y;
     const leftW = 74;
@@ -218,7 +231,7 @@ export class PdfService {
       },
     );
     doc.font('Helvetica').fontSize(7).text(
-      CERTIFICATE_COMPANY_SUBTITLE,
+      tcConfig?.companyAddress || CERTIFICATE_COMPANY_SUBTITLE,
       this.margin + leftW,
       y + 19,
       {
@@ -262,27 +275,28 @@ export class PdfService {
     data: {
       batchNumber: string;
       grade: string;
+      tubeType: string;
       customer: string;
     },
   ) {
-    const cols = [90, 187, 90, this.contentWidth - 367];
+    const cols = [68, 132, 54, 96, 72, this.contentWidth - 422];
     const y = doc.y;
 
-    this.drawRow(doc, y, ['TC NO', `QC-${data.batchNumber}`, 'DATE', new Date().toLocaleDateString()], cols, {
+    this.drawRow(doc, y, ['TC NO', `QC-${data.batchNumber}`, 'DATE', new Date().toLocaleDateString(), 'BATCH NO.', data.batchNumber], cols, {
+      fontSize: 6.2,
+      boldCells: [0, 2, 4],
+      fillCells: [0, 2, 4],
+    });
+    this.drawRow(doc, y + 14, ['M/S.', data.customer || '-', 'P.O. / INV.', '-', '', ''], cols, {
       fontSize: 6.2,
       boldCells: [0, 2],
-      fillCells: [0, 2],
     });
-    this.drawRow(doc, y + 14, ['M/S.', data.customer || '-', 'P.O. / INV.', '-'], cols, {
-      fontSize: 6.2,
-      boldCells: [0, 2],
-    });
-    this.drawTallRow(doc, y + 28, ['PRODUCT', 'WROUGHT COPPER TUBES FOR REFRIGERATION AND AIR CONDITIONING PURPOSES', 'BATCH NO.', data.batchNumber], cols, 18, {
+    this.drawTallRow(doc, y + 28, ['PRODUCT', data.tubeType || 'Smooth Copper Tube', '', '', '', ''], cols, 18, {
       fontSize: 5.6,
-      boldCells: [0, 2],
-      alignments: ['center', 'left', 'center', 'left'],
+      boldCells: [0],
+      alignments: ['center', 'left', 'left', 'left', 'left', 'left'],
     });
-    this.drawRow(doc, y + 46, ['SPECIFICATION', 'IS 10773:2025', 'GRADE', data.grade || '-'], cols, {
+    this.drawRow(doc, y + 46, ['SPECIFICATION', 'IS 10773:2025', 'GRADE', data.grade || '-', '', ''], cols, {
       fontSize: 6.2,
       boldCells: [0, 2],
     });

@@ -6,6 +6,10 @@ export class SaveCompanyTcConfigDto {
 
   @IsOptional()
   @IsString()
+  companyAddress?: string | null;
+
+  @IsOptional()
+  @IsString()
   logoUrl?: string | null;
 
   @IsOptional()

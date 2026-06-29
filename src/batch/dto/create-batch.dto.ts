@@ -2,6 +2,7 @@ import { Type } from 'class-transformer';
 import {
   ArrayMinSize,
   IsArray,
+  IsIn,
   IsNotEmpty,
   IsNumber,
   IsOptional,
@@ -64,6 +65,11 @@ export class CreateBatchDto {
   @IsString()
   @IsNotEmpty()
   grade: string;
+
+  @IsString()
+  @IsNotEmpty()
+  @IsIn(['Smooth Copper Tube', 'Smooth Copper Coil'])
+  tubeType: string;
 
   @Type(() => Number)
   @IsNumber()

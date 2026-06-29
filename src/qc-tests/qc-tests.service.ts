@@ -19,6 +19,7 @@ type JwtUser = {
 
 type CompanyTcConfigPayload = {
   companyName: string;
+  companyAddress?: string | null;
   logoUrl?: string | null;
   isoHallmarkUrl?: string | null;
 };
@@ -29,6 +30,7 @@ type CustomerTcData = {
     batchNumber: string;
     grade?: string;
     gradeId?: string;
+    tubeType?: string;
     condition?: string;
   };
   customer: {
@@ -691,6 +693,7 @@ export class QcTestsService {
         batchNumber: qcTest.batch.batchNumber,
         grade: qcTest.batch.grade,
         gradeId: qcTest.batch.gradeId,
+        tubeType: (qcTest.batch as any).tubeType,
         condition: qcTest.batch.condition,
       },
       customer: {
@@ -878,6 +881,7 @@ export class QcTestsService {
         batchNumber: batch.batchNumber,
         grade: batch.grade,
         gradeId: batch.gradeId,
+        tubeType: (batch as any).tubeType,
         condition: batch.condition,
       },
       customer: {

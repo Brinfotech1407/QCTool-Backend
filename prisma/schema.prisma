@@ -123,6 +123,7 @@ model Batch {
   batchNumber String @unique
 
   grade   String @default("")
+  tubeType String @default("Smooth Copper Tube")
   totalQty Float @default(0)
   gradeId String @default("DEFAULT")
   condition String @default("NA")
@@ -281,6 +282,7 @@ model CompanyTcConfig {
   id             String   @id @default(uuid())
   companyId      String   @unique
   companyName    String
+  companyAddress String?
   logoUrl        String?
   isoHallmarkUrl String?
   createdAt      DateTime @default(now())
