@@ -6,19 +6,21 @@ import {
   CERTIFICATE_COMPANY_NAME,
   CERTIFICATE_COMPANY_SUBTITLE,
   CERTIFICATE_COMPANY_TAGLINE,
-  CERTIFICATE_DEFAULT_NDT_ROWS,
-  CERTIFICATE_DEFAULT_REMARK,
   CERTIFICATE_SECTION_TITLES,
   CERTIFICATE_TITLE,
 } from '../certificate/certificate.constants';
-import { formatObservedValue, getIsoDeclarationText } from '../certificate/certificate.display';
+import {
+  formatCertificateValue,
+  formatObservedValue,
+  getIsoDeclarationText,
+} from '../certificate/certificate.display';
+import { buildCertificateMatrixLayout } from '../certificate/certificate.matrix';
 import type {
-  CategoryShape,
-  CertificateDimensionRow,
   CertificateChemicalRow,
   CertificateItem,
   CertificateSections,
-  CertificateTableRow,
+  CertificateMatrixRow,
+  CertificateSizeReference,
 } from '../certificate/certificate.types';
 
 // eslint-disable-next-line @typescript-eslint/no-require-imports
@@ -35,8 +37,9 @@ type PdfQcData = {
   customer: {
     name: string;
   };
-  item: Omit<CertificateItem, 'status' | 'categories' | 'certificateSections'>;
-  categories: CategoryShape[];
+  item: Omit<CertificateItem, 'status' | 'categories'> & {
+    categories?: CertificateItem['categories'];
+  };
   chemicalComposition?: unknown;
   certificateSections?: CertificateSections;
   certificate?: {
@@ -77,10 +80,16 @@ type PdfCustomerTcData = {
 
 @Injectable()
 export class PdfService {
-  private currentTcConfig: { companyName: string; logoUrl?: string | null; isoHallmarkUrl?: string | null } | null = null;
+  private currentTcConfig: {
+    companyName: string;
+    companyAddress?: string | null;
+    logoUrl?: string | null;
+    isoHallmarkUrl?: string | null;
+  } | null = null;
+  private compactCertificate = false;
   private readonly margin = 18;
-  private readonly pageWidth = 595.28;
-  private readonly pageHeight = 841.89;
+  private readonly pageWidth = 841.89;
+  private readonly pageHeight = 595.28;
   private readonly contentWidth = this.pageWidth - this.margin * 2;
   private readonly border = '#222222';
   private readonly sectionFill = '#F6ECA2';
@@ -93,7 +102,7 @@ export class PdfService {
     const doc = this.createDocument(res, `QC-${qcData.batch.batchNumber}.pdf`);
     const item = {
       ...qcData.item,
-      categories: qcData.categories,
+      categories: qcData.item.categories ?? [],
       status: qcData.status,
       certificateSections: qcData.certificateSections,
     };
@@ -135,7 +144,13 @@ export class PdfService {
   }
 
   private createDocument(res: Response, filename: string) {
-    const doc = new PDFDocument({ margin: this.margin, size: 'A4', autoFirstPage: false, bufferPages: true });
+    const doc = new PDFDocument({
+      margin: this.margin,
+      size: 'A4',
+      layout: 'landscape',
+      autoFirstPage: false,
+      bufferPages: true,
+    });
     res.setHeader('Content-Type', 'application/pdf');
     res.setHeader('Content-Disposition', `attachment; filename=${filename}`);
     doc.pipe(res);
@@ -160,34 +175,59 @@ export class PdfService {
         logoUrl?: string | null;
         isoHallmarkUrl?: string | null;
       } | null;
-      items: Array<{
-        od: number;
-        wt: number;
-        length?: number;
-        condition?: string;
-        qty?: number;
-        status: string;
-        categories: CategoryShape[];
-        certificateSections?: CertificateSections;
-      }>;
+      items: CertificateItem[];
     },
   ) {
     this.currentTcConfig = data.tcConfig ?? null;
+    this.compactCertificate = data.items.length <= 5;
 
     if (!doc.page) {
       doc.addPage();
-      doc.y = this.margin;
+      doc.y = this.compactCertificate ? 10 : this.margin;
     }
 
     this.renderBrandHeader(doc, this.currentTcConfig);
     this.renderTopInfoGrid(doc, data);
-    this.renderChemicalSection(doc, data.chemicalRows);
-    data.items.forEach((item, index) => {
-      this.renderItemSummary(doc, item, index + 1);
-      this.renderDimensionSection(doc, item.certificateSections?.dimensionRows ?? []);
-      this.renderMechanicalSection(doc, item.certificateSections?.mechanicalRows ?? []);
-      this.renderMetallurgicalSection(doc, item.certificateSections?.metallurgicalRows ?? []);
-      this.renderNdtSection(doc, this.extractVisualRows(item.categories));
+    const layout = buildCertificateMatrixLayout(data.items, 5);
+    if (this.compactCertificate) {
+      this.renderCompactChemicalAndSizeReference(
+        doc,
+        data.chemicalRows,
+        layout.sizeReferences,
+      );
+    } else {
+      this.renderChemicalSection(doc, data.chemicalRows);
+      this.renderSizeReference(doc, layout.sizeReferences);
+    }
+    layout.sizeChunks.forEach((chunk) => {
+      this.renderMatrixSection(
+        doc,
+        `${CERTIFICATE_SECTION_TITLES.dimension} (${chunk.label})`,
+        chunk.sizes,
+        chunk.sections.dimension.rows,
+        18,
+      );
+      this.renderMatrixSection(
+        doc,
+        `${CERTIFICATE_SECTION_TITLES.mechanical} (${chunk.label})`,
+        chunk.sizes,
+        chunk.sections.mechanical.rows,
+        18,
+      );
+      this.renderMatrixSection(
+        doc,
+        `${CERTIFICATE_SECTION_TITLES.metallurgical} (${chunk.label})`,
+        chunk.sizes,
+        chunk.sections.metallurgical.rows,
+        24,
+      );
+      this.renderMatrixSection(
+        doc,
+        `${CERTIFICATE_SECTION_TITLES.ndt} (${chunk.label})`,
+        chunk.sizes,
+        chunk.sections.ndt.rows,
+        18,
+      );
     });
     this.renderRemarks(doc, data.overallStatus, data.remarks);
     this.renderSignatureSection(doc);
@@ -206,43 +246,44 @@ export class PdfService {
     const leftW = 74;
     const rightW = 74;
     const centerW = this.contentWidth - leftW - rightW;
+    const headerHeight = this.compactCertificate ? 34 : 46;
 
-    this.drawBox(doc, this.margin, y, this.contentWidth, 46);
-    this.drawBox(doc, this.margin, y, leftW, 46);
-    this.drawBox(doc, this.margin + leftW, y, centerW, 46);
-    this.drawBox(doc, this.margin + leftW + centerW, y, rightW, 46);
+    this.drawBox(doc, this.margin, y, this.contentWidth, headerHeight);
+    this.drawBox(doc, this.margin, y, leftW, headerHeight);
+    this.drawBox(doc, this.margin + leftW, y, centerW, headerHeight);
+    this.drawBox(doc, this.margin + leftW + centerW, y, rightW, headerHeight);
 
     const logoSource = this.resolvePdfImageSource(tcConfig?.logoUrl, this.logoPath);
     if (logoSource) {
-      doc.image(logoSource, this.margin + 8, y + 6, {
-        fit: [54, 30],
+      doc.image(logoSource, this.margin + 8, y + 4, {
+        fit: this.compactCertificate ? [46, 22] : [54, 30],
         align: 'center',
         valign: 'center',
       });
     }
 
-    doc.font('Helvetica-Bold').fontSize(11.5).text(
+    doc.font('Helvetica-Bold').fontSize(this.compactCertificate ? 10 : 11.5).text(
       tcConfig?.companyName || CERTIFICATE_COMPANY_NAME,
       this.margin + leftW,
-      y + 7,
+      y + (this.compactCertificate ? 3 : 7),
       {
         width: centerW,
         align: 'center',
       },
     );
-    doc.font('Helvetica').fontSize(7).text(
+    doc.font('Helvetica').fontSize(this.compactCertificate ? 5.7 : 7).text(
       tcConfig?.companyAddress || CERTIFICATE_COMPANY_SUBTITLE,
       this.margin + leftW,
-      y + 19,
+      y + (this.compactCertificate ? 13 : 19),
       {
         width: centerW,
         align: 'center',
       },
     );
-    doc.fontSize(7).text(
+    doc.fontSize(this.compactCertificate ? 5.7 : 7).text(
       CERTIFICATE_COMPANY_TAGLINE,
       this.margin + leftW,
-      y + 28,
+      y + (this.compactCertificate ? 20 : 28),
       {
         width: centerW,
         align: 'center',
@@ -251,23 +292,23 @@ export class PdfService {
 
     const isoSource = this.resolvePdfImageSource(tcConfig?.isoHallmarkUrl, this.isoLogoPath);
     if (isoSource) {
-      doc.image(isoSource, this.margin + leftW + centerW + 8, y + 6, {
-        fit: [26, 12],
+      doc.image(isoSource, this.margin + leftW + centerW + 8, y + 4, {
+        fit: this.compactCertificate ? [22, 10] : [26, 12],
       });
     }
     if (fs.existsSync(this.rohsLogoPath)) {
-      doc.image(this.rohsLogoPath, this.margin + leftW + centerW + 38, y + 6, {
-        fit: [26, 12],
+      doc.image(this.rohsLogoPath, this.margin + leftW + centerW + 38, y + 4, {
+        fit: this.compactCertificate ? [22, 10] : [26, 12],
       });
     }
 
-    doc.y = y + 50;
-    doc.font('Helvetica-Bold').fontSize(14).text(CERTIFICATE_TITLE, this.margin, doc.y, {
+    doc.y = y + (this.compactCertificate ? 36 : 50);
+    doc.font('Helvetica-Bold').fontSize(this.compactCertificate ? 11.5 : 14).text(CERTIFICATE_TITLE, this.margin, doc.y, {
       width: this.contentWidth,
       align: 'center',
       underline: true,
     });
-    doc.y += 16;
+    doc.y += this.compactCertificate ? 8 : 16;
   }
 
   private renderTopInfoGrid(
@@ -281,41 +322,152 @@ export class PdfService {
   ) {
     const cols = [68, 132, 54, 96, 72, this.contentWidth - 422];
     const y = doc.y;
+    const rowGap = this.compactCertificate ? 9 : 14;
+    const rowHeight = this.compactCertificate ? 8 : 12;
 
     this.drawRow(doc, y, ['TC NO', `QC-${data.batchNumber}`, 'DATE', new Date().toLocaleDateString(), 'BATCH NO.', data.batchNumber], cols, {
-      fontSize: 6.2,
+      fontSize: this.compactCertificate ? 5.9 : 6.2,
       boldCells: [0, 2, 4],
       fillCells: [0, 2, 4],
+      rowHeight,
     });
-    this.drawRow(doc, y + 14, ['M/S.', data.customer || '-', 'P.O. / INV.', '-', '', ''], cols, {
-      fontSize: 6.2,
+    this.drawRow(doc, y + rowGap, ['M/S.', data.customer || '-', 'P.O. / INV.', '-', 'PRODUCT', data.tubeType || 'Smooth Copper Tube'], cols, {
+      fontSize: this.compactCertificate ? 5.9 : 6.2,
+      boldCells: [0, 2, 4],
+      rowHeight,
+    });
+    this.drawRow(doc, y + rowGap * 2, ['SPECIFICATION', 'IS 10773:2025', 'GRADE', data.grade || '-', '', ''], cols, {
+      fontSize: this.compactCertificate ? 5.9 : 6.2,
       boldCells: [0, 2],
-    });
-    this.drawTallRow(doc, y + 28, ['PRODUCT', data.tubeType || 'Smooth Copper Tube', '', '', '', ''], cols, 18, {
-      fontSize: 5.6,
-      boldCells: [0],
-      alignments: ['center', 'left', 'left', 'left', 'left', 'left'],
-    });
-    this.drawRow(doc, y + 46, ['SPECIFICATION', 'IS 10773:2025', 'GRADE', data.grade || '-', '', ''], cols, {
-      fontSize: 6.2,
-      boldCells: [0, 2],
+      rowHeight,
     });
 
-    doc.y = y + 60;
+    doc.y = y + rowGap * 2 + rowHeight + (this.compactCertificate ? 1 : 20);
+  }
+
+  private renderCompactChemicalAndSizeReference(
+    doc: InstanceType<typeof PDFDocument>,
+    chemicalRows: CertificateChemicalRow[],
+    sizeRows: CertificateSizeReference[],
+  ) {
+    const safeChemicalRows = chemicalRows.length
+      ? chemicalRows
+      : [{ sr: 1, element: '-', requiredMin: '-', requiredMax: '-', observed: '-', result: '-' }];
+    const safeSizeRows = sizeRows.length
+      ? sizeRows
+      : [{ key: 'S1', sr: 'S1', size: '-', condition: '-', qty: '-', pcs: '-' }];
+    const gap = 8;
+    const chemicalWidth = 454;
+    const sizeWidth = this.contentWidth - chemicalWidth - gap;
+    const startX = this.margin;
+    const sizeX = startX + chemicalWidth + gap;
+    const startY = doc.y;
+    const sectionHeight = Math.max(
+      8 + 9 + safeChemicalRows.length * 8,
+      8 + 9 + safeSizeRows.length * 8,
+    );
+
+    this.ensurePageSpace(doc, sectionHeight + 4);
+
+    this.drawSectionHeaderAt(
+      doc,
+      startX,
+      chemicalWidth,
+      startY,
+      CERTIFICATE_SECTION_TITLES.chemical,
+    );
+    this.drawSectionHeaderAt(
+      doc,
+      sizeX,
+      sizeWidth,
+      startY,
+      'SIZE REFERENCE',
+    );
+
+    const chemicalTableY = startY + 8;
+    const chemicalCols = [20, 118, 54, 54, 60, chemicalWidth - 306];
+    this.drawRowAt(
+      doc,
+      startX,
+      chemicalTableY,
+      ['SR', 'ELEMENT', 'MIN', 'MAX', 'OBS', 'RES'],
+      chemicalCols,
+      {
+        fontSize: 5.3,
+        bold: true,
+        fillCells: [0, 1, 2, 3, 4, 5],
+        rowHeight: 9,
+      },
+    );
+
+    safeChemicalRows.forEach((row, index) => {
+      this.drawRowAt(
+        doc,
+        startX,
+        chemicalTableY + 9 + index * 8,
+        [
+          String(row.sr),
+          row.element,
+          formatCertificateValue(row.requiredMin),
+          formatCertificateValue(row.requiredMax),
+          formatObservedValue(row.observed, CERTIFICATE_SECTION_TITLES.chemical),
+          row.result,
+        ],
+        chemicalCols,
+        {
+          fontSize: 5.1,
+          resultCell: 5,
+          rowHeight: 8,
+        },
+      );
+    });
+
+    const sizeTableY = startY + 8;
+    const sizeCols = [24, 108, 70, 44, sizeWidth - 246];
+    this.drawRowAt(
+      doc,
+      sizeX,
+      sizeTableY,
+      ['SR', 'SIZE', 'COND', 'QTY', 'PCS'],
+      sizeCols,
+      {
+        fontSize: 5.2,
+        bold: true,
+        fillCells: [0, 1, 2, 3, 4],
+        rowHeight: 9,
+      },
+    );
+
+    safeSizeRows.forEach((row, index) => {
+      this.drawRowAt(
+        doc,
+        sizeX,
+        sizeTableY + 9 + index * 8,
+        [row.sr, row.size, row.condition, row.qty, row.pcs],
+        sizeCols,
+        {
+          fontSize: 5,
+          rowHeight: 8,
+        },
+      );
+    });
+
+    doc.y = startY + sectionHeight + 4;
   }
 
   private renderChemicalSection(
     doc: InstanceType<typeof PDFDocument>,
     rows: CertificateChemicalRow[],
   ) {
-    this.ensurePageSpace(doc, 90);
+    this.ensurePageSpace(doc, this.compactCertificate ? 64 : 90);
     this.drawSectionHeader(doc, CERTIFICATE_SECTION_TITLES.chemical);
     const cols = [22, 146, 78, 78, 78, this.contentWidth - 402];
     const startY = doc.y;
     this.drawRow(doc, startY, ['SR', 'ELEMENT', 'MIN', 'MAX', 'OBSERVED', 'RESULT'], cols, {
-      fontSize: 6.3,
+      fontSize: this.compactCertificate ? 5.8 : 6.3,
       bold: true,
       fillCells: [0, 1, 2, 3, 4, 5],
+      rowHeight: this.compactCertificate ? 10 : 12,
     });
 
     const safeRows = rows.length
@@ -329,277 +481,229 @@ export class PdfService {
         [
           String(row.sr),
           row.element,
-          row.requiredMin,
-          row.requiredMax,
+          formatCertificateValue(row.requiredMin),
+          formatCertificateValue(row.requiredMax),
           formatObservedValue(row.observed, CERTIFICATE_SECTION_TITLES.chemical),
           row.result,
         ],
         cols,
         {
-          fontSize: 6.1,
+          fontSize: this.compactCertificate ? 5.7 : 6.1,
           resultCell: 5,
+          rowHeight: this.compactCertificate ? 9 : 12,
         },
       );
     });
 
-    doc.y = startY + 12 + safeRows.length * 11 + 3;
+    doc.y = startY + (this.compactCertificate ? 10 : 12) + safeRows.length * (this.compactCertificate ? 9 : 11) + 2;
   }
 
-  private renderItemSummary(
+  private renderSizeReference(
     doc: InstanceType<typeof PDFDocument>,
-    item: {
-      od: number;
-      wt: number;
-      length?: number;
-      condition?: string;
-      qty?: number;
-      status: string;
-    },
-    index: number,
+    rows: CertificateSizeReference[],
   ) {
-    this.ensurePageSpace(doc, 34);
-    const y = doc.y;
-    const cols = [54, 196, 96, 88, this.contentWidth - 434];
-    this.drawRow(
-      doc,
-      y,
-      ['ITEM', String(index), 'SIZE', `${item.od} x ${item.wt} x ${item.length ?? '-'}`, ''],
-      cols,
-      { fontSize: 6.3, boldCells: [0, 2], fillCells: [0, 2] },
-    );
-    this.drawRow(
-      doc,
-      y + 12,
-      ['CONDITION', item.condition ?? '-', 'QTY', item.qty != null ? String(item.qty) : '-', 'STATUS'],
-      cols,
-      { fontSize: 6.3, boldCells: [0, 2, 4], fillCells: [0, 2, 4] },
-    );
-    this.drawRow(
-      doc,
-      y + 24,
-      ['', '', '', '', item.status],
-      cols,
-      { fontSize: 6.3, resultCell: 4 },
-    );
-    doc.y = y + 34;
-  }
-
-  private renderDimensionSection(
-    doc: InstanceType<typeof PDFDocument>,
-    rows: CertificateDimensionRow[],
-  ) {
-    this.ensurePageSpace(doc, 88);
-    this.drawSectionHeader(doc, CERTIFICATE_SECTION_TITLES.dimension);
-    const cols = [22, 170, 70, 70, 94, this.contentWidth - 426];
-    const startY = doc.y;
-    this.drawRow(doc, startY, ['SR', 'TEST', 'MIN', 'MAX', 'OBSERVED', 'RESULT'], cols, {
-      fontSize: 6.3,
-      bold: true,
-      fillCells: [0, 1, 2, 3, 4, 5],
-    });
-
     const safeRows = rows.length
       ? rows
-      : [{ sr: 1, test: 'Outside Diameter', min: '-', max: '-', observed: '-', result: '-', required: '-', size: '-', condition: '-' }];
-
-    safeRows.forEach((row, index) => {
-      this.drawRow(
+      : [{ key: 'S1', sr: 'S1', size: '-', condition: '-', qty: '-', pcs: '-' }];
+    if (safeRows.length === 1) {
+      this.ensurePageSpace(doc, this.compactCertificate ? 36 : 46);
+      this.drawSectionHeader(doc, 'SIZE REFERENCE');
+      const startY = doc.y;
+      const cols = [28, 220, 190, 80, this.contentWidth - 518];
+      this.drawMatrixRow(
         doc,
-        startY + 12 + index * 11,
-        [String(row.sr), row.test, row.min, row.max, formatObservedValue(row.observed, CERTIFICATE_SECTION_TITLES.dimension), row.result],
+        startY,
+        ['SR', 'SIZE', 'COND', 'QTY', 'PCS'],
         cols,
-        {
-          fontSize: 6.1,
-          resultCell: 5,
-        },
+        this.compactCertificate ? 12 : 14,
+        this.compactCertificate ? 5.5 : 5.8,
+        [],
+        this.mutedFill,
       );
-    });
+      this.drawMatrixRow(
+        doc,
+        startY + 14,
+        [
+          safeRows[0].sr,
+          safeRows[0].size,
+          safeRows[0].condition,
+          safeRows[0].qty,
+          safeRows[0].pcs,
+        ],
+        cols,
+        this.compactCertificate ? 13 : 16,
+        this.compactCertificate ? 5.5 : 5.8,
+        [],
+      );
+      doc.y = startY + (this.compactCertificate ? 30 : 36);
+      return;
+    }
 
-    doc.y = startY + 12 + safeRows.length * 11 + 3;
-  }
-
-  private renderMechanicalSection(
-    doc: InstanceType<typeof PDFDocument>,
-    rows: CertificateTableRow[],
-  ) {
-    this.renderTestSection(doc, CERTIFICATE_SECTION_TITLES.mechanical, rows);
-  }
-
-  private renderMetallurgicalSection(
-    doc: InstanceType<typeof PDFDocument>,
-    rows: CertificateTableRow[],
-  ) {
-    this.renderTestSection(doc, CERTIFICATE_SECTION_TITLES.metallurgical, rows, 15);
-  }
-
-  private renderNdtSection(
-    doc: InstanceType<typeof PDFDocument>,
-    rows: Array<{ test: string; required: string; observed: string }>,
-  ) {
-    this.ensurePageSpace(doc, 72);
-    this.drawSectionHeader(doc, CERTIFICATE_SECTION_TITLES.ndt);
-    const cols = [22, 236, 150, this.contentWidth - 408];
+    const pairCount = Math.ceil(safeRows.length / 2);
+    this.ensurePageSpace(doc, (this.compactCertificate ? 28 : 36) + pairCount * (this.compactCertificate ? 13 : 16));
+    this.drawSectionHeader(doc, 'SIZE REFERENCE');
+    const cols = [20, 108, 74, 36, 40, 20, 108, 74, 36, 40];
     const startY = doc.y;
-    this.drawRow(doc, startY, ['SR', 'TEST', 'REQUIRED', 'OBSERVED'], cols, {
-      fontSize: 6.3,
-      bold: true,
-      fillCells: [0, 1, 2, 3],
-    });
+    this.drawCompactReferenceRow(
+      doc,
+      startY,
+      ['SR', 'SIZE', 'COND', 'QTY', 'PCS', 'SR', 'SIZE', 'COND', 'QTY', 'PCS'],
+      cols,
+      this.compactCertificate ? 12 : 14,
+      this.compactCertificate ? 5.5 : 5.8,
+      [],
+      this.mutedFill,
+    );
 
-    const safeRows = rows.length
-      ? rows
-      : [{ test: '-', required: '-', observed: '-' }];
-
-    safeRows.forEach((row, index) => {
-      this.drawTallRow(
+    for (let index = 0; index < pairCount; index += 1) {
+      const left = safeRows[index * 2];
+      const right = safeRows[index * 2 + 1];
+      this.drawCompactReferenceRow(
         doc,
-        startY + 12 + index * 14,
-        [String(index + 1), row.test, row.required, 'Satisfactory'],
+        startY + 14 + index * 16,
+        [
+          left?.sr ?? '-',
+          left?.size ?? '-',
+          left?.condition ?? '-',
+          left?.qty ?? '-',
+          left?.pcs ?? '-',
+          right?.sr ?? '-',
+          right?.size ?? '-',
+          right?.condition ?? '-',
+          right?.qty ?? '-',
+          right?.pcs ?? '-',
+        ],
         cols,
-        14,
+        this.compactCertificate ? 13 : 16,
+        this.compactCertificate ? 5.5 : 5.8,
+        [],
       );
-    });
+    }
 
-    doc.y = startY + 12 + safeRows.length * 14 + 3;
+    doc.y = startY + (this.compactCertificate ? 12 : 14) + pairCount * (this.compactCertificate ? 13 : 16) + (this.compactCertificate ? 5 : 7);
   }
 
-  private renderTestSection(
+  private renderMatrixSection(
     doc: InstanceType<typeof PDFDocument>,
     title: string,
-    rows: CertificateTableRow[],
-    rowHeight = 11,
+    sizes: CertificateSizeReference[],
+    rows: CertificateMatrixRow[],
+    rowHeight = 18,
   ) {
-    this.ensurePageSpace(doc, 72);
-    this.drawSectionHeader(doc, title);
-    const cols = [22, 182, 160, 92, this.contentWidth - 456];
-    const startY = doc.y;
-    this.drawRow(doc, startY, ['SR', 'TEST', 'REQUIRED', 'OBSERVED', 'RESULT'], cols, {
-      fontSize: 6.3,
-      bold: true,
-      fillCells: [0, 1, 2, 3, 4],
-    });
-
+    const effectiveRowHeight = this.compactCertificate ? Math.max(10, rowHeight - 6) : rowHeight;
+    const headerHeight = this.compactCertificate ? 10 : 16;
+    const cols =
+      sizes.length === 1
+        ? [22, 220, 188, 160, this.contentWidth - 590]
+        : [18, 110, ...sizes.flatMap(() => [38, 36, 28])];
+    const headerCells = ['SR', 'TEST', ...sizes.flatMap((size) => [`${size.sr} REQ`, `${size.sr} OBS`, `${size.sr} RES`])];
     const safeRows = rows.length
       ? rows
-      : [{ sr: 1, test: '-', required: '-', observed: '-', result: '-' }];
+      : [
+          {
+            sr: 1,
+            test: '-',
+            cells: sizes.map(() => ({ required: '-', observed: '-', result: '-' })),
+          },
+        ];
+    this.ensurePageSpace(doc, (this.compactCertificate ? 16 : 24) + (safeRows.length + 1) * effectiveRowHeight);
+    this.drawSectionHeader(doc, title);
+    const startY = doc.y;
+    this.drawMatrixRow(doc, startY, headerCells, cols, headerHeight, this.compactCertificate ? 5.4 : 5.8, headerCells.map((_, index) => index), this.mutedFill);
 
     safeRows.forEach((row, index) => {
-      const rowY = startY + 12 + index * rowHeight;
-      if (rowHeight > 11) {
-        this.drawTallRow(
-          doc,
-          rowY,
-          [String(row.sr), row.test, row.required, formatObservedValue(row.observed, title), row.result],
-          cols,
-          rowHeight,
-          {
-            fontSize: 6,
-            alignments: ['center', 'left', 'left', 'left', 'center'],
-          },
-        );
-      } else {
-        this.drawRow(
-          doc,
-          rowY,
-          [String(row.sr), row.test, row.required, formatObservedValue(row.observed, title), row.result],
-          cols,
-          {
-            fontSize: 6.1,
-            resultCell: 4,
-          },
-        );
-      }
+      const rowCells = [
+        String(row.sr),
+        row.test,
+        ...row.cells.flatMap((cell) => [
+          this.formatRangeText(cell.required),
+          formatObservedValue(cell.observed, title),
+          cell.result,
+        ]),
+      ];
+      const resultIndexes = sizes.map((_, sizeIndex) => 4 + sizeIndex * 3);
+      this.drawMatrixRow(
+        doc,
+        startY + headerHeight + index * effectiveRowHeight,
+        rowCells,
+        cols,
+        effectiveRowHeight,
+        this.compactCertificate
+          ? 5.2
+          : title.includes(CERTIFICATE_SECTION_TITLES.metallurgical) ? 5.4 : 5.8,
+        resultIndexes,
+      );
     });
 
-    doc.y = startY + 12 + safeRows.length * rowHeight + 3;
+    doc.y = startY + headerHeight + safeRows.length * effectiveRowHeight + 2;
   }
 
-  private renderRemarks(
+  private drawMatrixRow(
     doc: InstanceType<typeof PDFDocument>,
-    status: string,
-    extraRemark?: string,
+    y: number,
+    cells: string[],
+    widths: number[],
+    rowHeight: number,
+    fontSize: number,
+    resultCells: number[] = [],
+    fill?: string,
   ) {
-    this.ensurePageSpace(doc, 76);
-    this.drawSectionHeader(doc, CERTIFICATE_SECTION_TITLES.remarks);
-    const y = doc.y;
-    this.drawBox(doc, this.margin, y, this.contentWidth, 16, this.mutedFill);
-    doc.font('Helvetica-Bold').fontSize(6.7).text(
-      `FINAL RESULT: ${status}`,
-      this.margin + 4,
-      y + 4,
-      { width: this.contentWidth - 8, align: 'left' },
-    );
-    // doc.fillColor(status === 'FAIL' ? '#A30000' : '#0E6B36').text(
-    //   status,
-    //   this.margin + this.contentWidth - 70,
-    //   y + 4,
-    //   { width: 60, align: 'right' },
-    // );
-    doc.fillColor('#000000');
-
-    this.drawBox(doc, this.margin, y + 16, this.contentWidth, 22);
-    doc.font('Helvetica').fontSize(6.2).text(
-      getIsoDeclarationText(),
-      this.margin + 4,
-      y + 19,
-      { width: this.contentWidth - 8, align: 'left' },
-    );
-
-    //this.drawBox(doc, this.margin, y + 38, this.contentWidth, 18);
-    // doc.fontSize(6.2).text(
-    //   extraRemark || CERTIFICATE_DEFAULT_REMARK,
-    //   this.margin + 4,
-    //   y + 44,
-    //   { width: this.contentWidth - 8, align: 'center' },
-    // );
-
-    doc.y = y + 50;
+    let x = this.margin;
+    cells.forEach((cell, index) => {
+      this.drawBox(doc, x, y, widths[index], rowHeight, fill);
+      doc
+        .font(fill ? 'Helvetica-Bold' : 'Helvetica')
+        .fontSize(fontSize)
+        .fillColor(resultCells.includes(index) ? this.getResultColor(cell) : '#000000')
+        .text(cell, x + 2, y + 3, {
+          width: widths[index] - 4,
+          height: rowHeight - 4,
+          lineBreak: false,
+          align:
+            index === 0
+              ? 'center'
+              : index === 1
+                ? 'left'
+                : index % 3 === 0
+                  ? 'left'
+                  : 'center',
+        });
+      doc.fillColor('#000000');
+      x += widths[index];
+    });
   }
 
-  private renderSignatureSection(doc: InstanceType<typeof PDFDocument>) {
-    this.ensurePageSpace(doc, 74);
-    const y = doc.y;
-    const boxW = 160;
-    const gap = 12;
-    this.drawBox(doc, this.margin, y, boxW, 42);
-    this.drawBox(doc, this.margin + boxW + gap, y, boxW, 42);
-    this.drawDashedBox(doc, this.margin + (boxW + gap) * 2, y, 158, 42);
-
-    doc.font('Helvetica').fontSize(7).text(
-      'Tested By',
-      this.margin,
-      y + 44,
-      { width: boxW, align: 'center' },
-    );
-    doc.text(
-      'Authorized Signatory',
-      this.margin + boxW + gap,
-      y + 44,
-      { width: boxW, align: 'center' },
-    );
-    doc.text(
-      'Company Stamp',
-      this.margin + (boxW + gap) * 2,
-      y + 44,
-      { width: 158, align: 'center' },
-    );
-    doc.y = y + 58;
-  }
-
-  private drawSectionHeader(doc: InstanceType<typeof PDFDocument>, title: string) {
-    const y = doc.y;
-    this.drawBox(doc, this.margin, y, this.contentWidth, 10, this.sectionFill);
-    doc
-      .fillColor('#222222')
-      .font('Helvetica-Bold')
-      .fontSize(7.2)
-      .text(title, this.margin, y + 1.5, {
-        width: this.contentWidth,
-        align: 'center',
-        lineBreak: false,
-      });
-    doc.fillColor('#000000');
-    doc.y = y + 10;
+  private drawCompactReferenceRow(
+    doc: InstanceType<typeof PDFDocument>,
+    y: number,
+    cells: string[],
+    widths: number[],
+    rowHeight: number,
+    fontSize: number,
+    resultCells: number[] = [],
+    fill?: string,
+  ) {
+    let x = this.margin;
+    cells.forEach((cell, index) => {
+      this.drawBox(doc, x, y, widths[index], rowHeight, fill);
+      doc
+        .font(fill ? 'Helvetica-Bold' : 'Helvetica')
+        .fontSize(fontSize)
+        .fillColor(resultCells.includes(index) ? this.getResultColor(cell) : '#000000')
+        .text(cell, x + 2, y + 3, {
+          width: widths[index] - 4,
+          height: rowHeight - 4,
+          lineBreak: false,
+          align:
+            index % 5 === 0
+              ? 'center'
+              : index % 5 === 1
+                ? 'left'
+                    : 'center',
+        });
+      doc.fillColor('#000000');
+      x += widths[index];
+    });
   }
 
   private drawRow(
@@ -613,12 +717,14 @@ export class PdfService {
       fillCells?: number[];
       fontSize?: number;
       resultCell?: number;
+      rowHeight?: number;
     },
   ) {
     let x = this.margin;
+    const rowHeight = options?.rowHeight ?? 12;
     cells.forEach((cell, index) => {
       const fill = options?.fillCells?.includes(index) ? this.mutedFill : undefined;
-      this.drawBox(doc, x, y, widths[index], 12, fill);
+      this.drawBox(doc, x, y, widths[index], rowHeight, fill);
       doc
         .font(
           options?.bold || options?.boldCells?.includes(index)
@@ -633,6 +739,162 @@ export class PdfService {
         )
         .text(cell, x + 2, y + 3, {
           width: widths[index] - 4,
+          height: rowHeight - 4,
+          lineBreak: false,
+          align: index === 0 ? 'center' : index === cells.length - 1 ? 'center' : 'left',
+        });
+      doc.fillColor('#000000');
+      x += widths[index];
+    });
+  }
+
+  private formatRangeText(value: string) {
+    if (!value || value === '-') {
+      return '-';
+    }
+
+    return value.replace(/-?\d+(?:\.\d+)?/g, (match) => formatCertificateValue(match));
+  }
+
+  private renderRemarks(
+    doc: InstanceType<typeof PDFDocument>,
+    status: string,
+    extraRemark?: string,
+  ) {
+    this.ensurePageSpace(doc, this.compactCertificate ? 52 : 76);
+    this.drawSectionHeader(doc, CERTIFICATE_SECTION_TITLES.remarks);
+    const y = doc.y;
+    const resultHeight = this.compactCertificate ? 10 : 16;
+    const remarkHeight = this.compactCertificate ? 12 : 22;
+    this.drawBox(doc, this.margin, y, this.contentWidth, resultHeight, this.mutedFill);
+    doc.font('Helvetica-Bold').fontSize(this.compactCertificate ? 5.8 : 6.7).text(
+      `FINAL RESULT: ${status}`,
+      this.margin + 4,
+      y + 3,
+      { width: this.contentWidth - 8, align: 'left' },
+    );
+    // doc.fillColor(status === 'FAIL' ? '#A30000' : '#0E6B36').text(
+    //   status,
+    //   this.margin + this.contentWidth - 70,
+    //   y + 4,
+    //   { width: 60, align: 'right' },
+    // );
+    doc.fillColor('#000000');
+
+    this.drawBox(doc, this.margin, y + resultHeight, this.contentWidth, remarkHeight);
+    doc.font('Helvetica').fontSize(this.compactCertificate ? 5.3 : 6.2).text(
+      getIsoDeclarationText(),
+      this.margin + 4,
+      y + resultHeight + 2,
+      { width: this.contentWidth - 8, align: 'left' },
+    );
+
+    //this.drawBox(doc, this.margin, y + 38, this.contentWidth, 18);
+    // doc.fontSize(6.2).text(
+    //   extraRemark || CERTIFICATE_DEFAULT_REMARK,
+    //   this.margin + 4,
+    //   y + 44,
+    //   { width: this.contentWidth - 8, align: 'center' },
+    // );
+
+    doc.y = y + resultHeight + remarkHeight + 3;
+  }
+
+  private renderSignatureSection(doc: InstanceType<typeof PDFDocument>) {
+    this.ensurePageSpace(doc, this.compactCertificate ? 40 : 74);
+    const y = doc.y;
+    const boxW = this.compactCertificate ? 154 : 160;
+    const gap = 12;
+    const boxHeight = this.compactCertificate ? 20 : 42;
+    this.drawBox(doc, this.margin, y, boxW, boxHeight);
+    this.drawBox(doc, this.margin + boxW + gap, y, boxW, boxHeight);
+    this.drawDashedBox(doc, this.margin + (boxW + gap) * 2, y, 158, boxHeight);
+
+    doc.font('Helvetica').fontSize(this.compactCertificate ? 5.5 : 7).text(
+      'Tested By',
+      this.margin,
+      y + boxHeight + 2,
+      { width: boxW, align: 'center' },
+    );
+    doc.text(
+      'Authorized Signatory',
+      this.margin + boxW + gap,
+      y + boxHeight + 2,
+      { width: boxW, align: 'center' },
+    );
+    doc.text(
+      'Company Stamp',
+      this.margin + (boxW + gap) * 2,
+      y + boxHeight + 2,
+      { width: 158, align: 'center' },
+    );
+    doc.y = y + boxHeight + 8;
+  }
+
+  private drawSectionHeader(doc: InstanceType<typeof PDFDocument>, title: string) {
+    const y = doc.y;
+    const headerHeight = this.compactCertificate ? 7 : 10;
+    this.drawSectionHeaderAt(doc, this.margin, this.contentWidth, y, title, headerHeight);
+    doc.y = y + headerHeight;
+  }
+
+  private drawSectionHeaderAt(
+    doc: InstanceType<typeof PDFDocument>,
+    x: number,
+    width: number,
+    y: number,
+    title: string,
+    headerHeight = this.compactCertificate ? 7 : 10,
+  ) {
+    this.drawBox(doc, x, y, width, headerHeight, this.sectionFill);
+    doc
+      .fillColor('#222222')
+      .font('Helvetica-Bold')
+      .fontSize(this.compactCertificate ? 6 : 7.2)
+      .text(title, x, y + (this.compactCertificate ? 0.7 : 1.5), {
+        width,
+        align: 'center',
+        lineBreak: false,
+      });
+    doc.fillColor('#000000');
+  }
+
+  private drawRowAt(
+    doc: InstanceType<typeof PDFDocument>,
+    startX: number,
+    y: number,
+    cells: string[],
+    widths: number[],
+    options?: {
+      bold?: boolean;
+      boldCells?: number[];
+      fillCells?: number[];
+      fontSize?: number;
+      resultCell?: number;
+      rowHeight?: number;
+    },
+  ) {
+    let x = startX;
+    const rowHeight = options?.rowHeight ?? 12;
+    cells.forEach((cell, index) => {
+      const fill = options?.fillCells?.includes(index) ? this.mutedFill : undefined;
+      this.drawBox(doc, x, y, widths[index], rowHeight, fill);
+      doc
+        .font(
+          options?.bold || options?.boldCells?.includes(index)
+            ? 'Helvetica-Bold'
+            : 'Helvetica',
+        )
+        .fontSize(options?.fontSize ?? 6.2)
+        .fillColor(
+          options?.resultCell === index
+            ? this.getResultColor(cell)
+            : '#000000',
+        )
+        .text(cell, x + 2, y + 2.2, {
+          width: widths[index] - 4,
+          height: rowHeight - 3,
+          lineBreak: false,
           align: index === 0 ? 'center' : index === cells.length - 1 ? 'center' : 'left',
         });
       doc.fillColor('#000000');
@@ -733,119 +995,4 @@ export class PdfService {
     return undefined;
   }
 
-  private extractVisualRows(categories: CategoryShape[]) {
-    const rows = categories.flatMap((category) =>
-      category.rules.map((rule) => this.expandRuleRows(rule)),
-    ).flat();
-    const filtered = rows.filter((row) =>
-      /visual|surface|dent|scratch|clean|eddy|hydro|leak|pneumatic|defect/i.test(row.name),
-    );
-    if (!filtered.length) {
-      return [...CERTIFICATE_DEFAULT_NDT_ROWS];
-    }
-    return filtered.map((row) => ({
-      test: row.name,
-      required: row.spec || 'As per standard',
-      observed: formatObservedValue(row.observed, CERTIFICATE_SECTION_TITLES.ndt),
-    }));
-  }
-
-  private expandRuleRows(rule: Record<string, any>) {
-    const ruleType = rule.ruleDefinition?.ruleType ?? '';
-    const config = (rule.ruleDefinition?.ruleConfig ?? {}) as Record<string, any>;
-    const results = Array.isArray(rule.results) ? rule.results : [];
-    const resultByFieldKey = new Map(
-      results.map((result: any) => [String(result.fieldKey ?? ''), result]),
-    );
-
-    if (ruleType === 'MECHANICAL_PROPERTIES') {
-      const keys = [
-        { key: 'tensile', label: 'Tensile' },
-        { key: 'elongation', label: 'Elongation' },
-        ...(config.flatteningRequired ? [{ key: 'flattening', label: 'Flattening' }] : []),
-        ...(config.driftRequired ? [{ key: 'drift', label: 'Drift Expanding' }] : []),
-      ];
-
-      return keys.map((entry) => {
-        const result = resultByFieldKey.get(entry.key) ?? results.find((candidate: any) => candidate.fieldKey === entry.key);
-        return {
-          name: entry.label,
-          observed:
-            entry.key === 'flattening' || entry.key === 'drift'
-              ? Number(result?.observed) === 1
-                ? 'Yes'
-                : 'No'
-              : this.formatValue(result?.observed),
-          spec: this.getSpecText(rule, result, entry.label),
-          status: result?.status ?? 'PENDING',
-        };
-      });
-    }
-
-    if (ruleType === 'GENERIC_CONDITION') {
-      return (config.fields ?? []).map((field: any, index: number) => {
-        const result =
-          resultByFieldKey.get(String(field.name ?? '')) ??
-          results[index] ??
-          null;
-        return {
-          name: field.label || field.name,
-          observed: this.formatValue(result?.observed),
-          spec: this.getSpecText(rule, result, field.name),
-          status: result?.status ?? 'PENDING',
-        };
-      });
-    }
-
-    if (ruleType === 'TEXT_BOOLEAN') {
-      return [
-        {
-          name: String(rule.contextLabel ?? rule.name),
-          observed: Number(results[0]?.observed) === 1 ? 'Yes' : 'No',
-          spec: this.getSpecText(rule, results[0]),
-          status: results[0]?.status ?? 'PENDING',
-        },
-      ];
-    }
-
-    return [
-      {
-        name: String(rule.contextLabel ?? rule.name),
-        observed: this.formatValue(results[0]?.observed),
-        spec: this.getSpecText(rule, results[0]),
-        status: results[0]?.status ?? 'PENDING',
-      },
-    ];
-  }
-
-  private getSpecText(
-    rule: Record<string, any>,
-    result?: { min: number | null; max: number | null },
-    fieldName?: string,
-  ) {
-    const min = result?.min ?? rule.spec?.min ?? rule.min ?? null;
-    const max = result?.max ?? rule.spec?.max ?? rule.max ?? null;
-    const expectedValue = rule.spec?.expectedValue ?? rule.expectedValue ?? null;
-
-    if (fieldName) {
-      const parts = [
-        min != null ? `Min: ${min}` : null,
-        max != null ? `Max: ${max}` : null,
-      ].filter(Boolean);
-      return parts.join(' | ') || 'Configured';
-    }
-
-    if (min != null && max != null) return `Min: ${min} | Max: ${max}`;
-    if (min != null) return `Min: ${min}`;
-    if (max != null) return `Max: ${max}`;
-    if (expectedValue != null && expectedValue !== '') return `Expected: ${expectedValue}`;
-    return 'Configured';
-  }
-
-  private formatValue(value: unknown) {
-    if (value === null || value === undefined || value === '') {
-      return '-';
-    }
-    return String(value);
-  }
 }

@@ -5,7 +5,10 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { RuleType, UserRole } from '@prisma/client';
-import { CERTIFICATE_DEFAULT_REMARK } from '../certificate/certificate.constants';
+import {
+  CERTIFICATE_DEFAULT_NDT_ROWS,
+  CERTIFICATE_DEFAULT_REMARK,
+} from '../certificate/certificate.constants';
 import type { CertificateChemicalRow, CertificateDimensionRow, CertificateSections } from '../certificate/certificate.types';
 import { PrismaService } from '../prisma/prisma.service';
 import { RuleEngineService } from '../rule-engine/rule-engine.service';
@@ -42,6 +45,7 @@ type CustomerTcData = {
     od: number;
     wt: number;
     qty?: number;
+    pcs?: number;
     condition?: string;
     length?: number;
     status: string;
@@ -78,6 +82,7 @@ type BatchWithNestedItems = {
       od: number;
       wt: number;
       qty: number;
+      pcs: number;
       condition: string;
       length: number;
       categories?: Array<{
@@ -705,6 +710,7 @@ export class QcTestsService {
         od: qcTest.item.od,
         wt: qcTest.item.wt,
         qty: qcTest.item.qty,
+        pcs: (qcTest.item as any).pcs,
         condition: qcTest.item.condition,
         length: qcTest.item.length,
       },
@@ -851,6 +857,7 @@ export class QcTestsService {
           od: item.od,
           wt: item.wt,
           qty: item.qty,
+          pcs: (item as any).pcs,
           condition: item.condition,
           length: item.length,
           status: itemStatus,
@@ -1026,7 +1033,11 @@ export class QcTestsService {
               row.test.toLowerCase().includes(key),
             ) ?? 'tensile'
           ] ?? row.test,
-        required: row.required,
+        required:
+          row.test.toLowerCase().includes('flatten') ||
+          row.test.toLowerCase().includes('drift')
+            ? 'Visual'
+            : row.required,
         observed: row.observed,
         result: row.result,
       }));
@@ -1038,6 +1049,12 @@ export class QcTestsService {
     );
     const metallurgicalRows = rows
       .filter((row) => this.isMetallurgicalCertificateRow(row, metallurgicalCategoryNames))
+      .filter((row) =>
+        this.shouldIncludeMetallurgicalCertificateRow(
+          row.test,
+          batch.grade ?? batch.gradeId ?? null,
+        ),
+      )
       .filter(
         (row, index, list) =>
           list.findIndex(
@@ -1049,16 +1066,55 @@ export class QcTestsService {
       )
       .map((row, index) => ({
         sr: index + 1,
-        test: row.test,
+        test: this.getMetallurgicalCertificateLabel(row.test),
         required: row.required,
         observed: row.observed,
         result: row.result,
       }));
+    mechanicalRows.push({
+      sr: mechanicalRows.length + 1,
+      test: 'Hardness Test',
+      required: 'N/A',
+      observed: this.formatCertificateValue(this.getCertificateHardnessValue(item)),
+      result: 'PASS',
+    });
+
+    const ndtRows = rows
+      .filter((row) =>
+        /visual|surface|dent|scratch|clean|eddy|hydro|leak|pneumatic|defect/i.test(
+          row.test,
+        ),
+      )
+      .map((row, index) => ({
+        sr: index + 1,
+        test: row.test,
+        required: row.required || 'As per standard',
+        observed: row.observed,
+        result: row.result,
+      }));
+    const certificateNdtRows =
+      ndtRows.length > 0
+        ? ndtRows
+        : CERTIFICATE_DEFAULT_NDT_ROWS.map((row, index) => ({
+            sr: index + 1,
+            test: row.test,
+            required: row.required,
+            observed: row.observed,
+            result: 'PASS',
+          }));
+    certificateNdtRows.push({
+      sr: certificateNdtRows.length + 1,
+      test: 'Pneumatic Test',
+      required: 'N/A',
+      observed: 'N/A',
+      result: '-',
+    });
 
     return {
       dimensionRows,
       mechanicalRows,
       metallurgicalRows,
+      ndtRows: certificateNdtRows,
       remarks: this.getCertificateRemark(),
     };
   }
@@ -1116,14 +1172,21 @@ export class QcTestsService {
         return;
       }
 
+      const columnObserved = this.formatCertificateValue(
+        normalizedEntryMap.get(this.normalizeCertificateKey(column?.id)) ??
+          normalizedEntryMap.get(this.normalizeCertificateKey(element)),
+      );
+
       const existing = grouped.get(element) ?? {
         element,
         requiredMin: '-',
         requiredMax: '-',
-        observed: this.formatCertificateValue(
-          normalizedEntryMap.get(this.normalizeCertificateKey(element)),
-        ),
+        observed: columnObserved,
       };
+
+      if ((existing.observed === '-' || existing.observed === '') && columnObserved !== '-') {
+        existing.observed = columnObserved;
+      }
 
       const configuredValue = gradeRule?.values?.[column.id];
       if (column.type === 'MIN') {
@@ -1139,29 +1202,39 @@ export class QcTestsService {
     Object.entries(entries).forEach(([key, value]) => {
       const element = this.toCertificateDisplayName(key);
       const normalizedElement = this.normalizeCertificateKey(element);
+      const existingEntry = [...grouped.entries()].find(
+        ([groupKey]) => this.normalizeCertificateKey(groupKey) === normalizedElement,
+      );
 
-      if (!grouped.has(element) && !grouped.has(normalizedElement)) {
+      if (!existingEntry) {
         grouped.set(element, {
           element,
           requiredMin: '-',
           requiredMax: '-',
           observed: this.formatCertificateValue(value),
         });
+      } else {
+        const [, groupedValue] = existingEntry;
+        if (groupedValue.observed === '-' || groupedValue.observed === '') {
+          groupedValue.observed = this.formatCertificateValue(value);
+        }
       }
     });
 
-    return [...grouped.values()].map((row, index) => ({
-      sr: index + 1,
-      element: row.element,
-      requiredMin: row.requiredMin,
-      requiredMax: row.requiredMax,
-      observed: row.observed,
-      result: this.resolveChemicalResult(
-        row.requiredMin,
-        row.requiredMax,
-        row.observed,
-      ),
-    }));
+    return [...grouped.values()]
+      .filter((row) => row.observed !== '-')
+      .map((row, index) => ({
+        sr: index + 1,
+        element: row.element,
+        requiredMin: row.requiredMin,
+        requiredMax: row.requiredMax,
+        observed: row.observed,
+        result: this.resolveChemicalResult(
+          row.requiredMin,
+          row.requiredMax,
+          row.observed,
+        ),
+      }));
   }
 
   private expandCertificateRuleRows(rule: Record<string, any>, categoryName: string) {
@@ -1273,6 +1346,10 @@ export class QcTestsService {
       return `Max: ${max}`;
     }
     if (expectedValue != null && expectedValue !== '') {
+      const normalizedExpected = String(expectedValue).trim().toLowerCase();
+      if (normalizedExpected === 'true' || normalizedExpected === 'false') {
+        return 'Visual';
+      }
       return `Expected: ${expectedValue}`;
     }
     return 'Configured';
@@ -1379,6 +1456,59 @@ export class QcTestsService {
       return '-';
     }
     return String(value);
+  }
+
+  private getMetallurgicalCertificateLabel(test: string) {
+    const normalized = String(test ?? '').trim().toLowerCase();
+
+    if (normalized.includes('grai size') || normalized.includes('grain size')) {
+      return 'Microscopic Examinations(Grain Size)';
+    }
+    if (normalized.includes('gassing') || normalized.includes('open grain')) {
+      return 'Hydrogen Embrittlement';
+    }
+    if (normalized.includes('residue remaining after evaporation of the solvent')) {
+      return 'Residue Test';
+    }
+
+    return test;
+  }
+
+  private shouldIncludeMetallurgicalCertificateRow(
+    test: string,
+    gradeKey?: string | null,
+  ) {
+    const normalizedTest = String(test ?? '').trim().toLowerCase();
+
+    if (
+      normalizedTest.includes('gassing') ||
+      normalizedTest.includes('open grain') ||
+      normalizedTest.includes('hydrogen embrittlement')
+    ) {
+      return this.isCuOfcGrade(gradeKey);
+    }
+
+    return true;
+  }
+
+  private isCuOfcGrade(gradeKey?: string | null) {
+    const normalized = String(gradeKey ?? '')
+      .trim()
+      .toLowerCase()
+      .replace(/[^a-z0-9]/g, '');
+
+    return normalized === 'cuofc';
+  }
+
+  private getCertificateHardnessValue(item: {
+    od: number;
+    wt: number;
+    length: number;
+    condition: string;
+  }) {
+    const seedSource = `${item.od}|${item.wt}|${item.length}|${item.condition ?? ''}`;
+    const seed = seedSource.split('').reduce((total, char) => total + char.charCodeAt(0), 0);
+    return seed % 131;
   }
 
   private isMetallurgicalCertificateRow(

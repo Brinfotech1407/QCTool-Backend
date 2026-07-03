@@ -7,6 +7,28 @@ export function isNonDestructiveCategory(categoryName?: string) {
   );
 }
 
+export function formatCertificateValue(value: unknown) {
+  if (value === null || value === undefined || value === '') {
+    return '-';
+  }
+
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    return value.toFixed(2);
+  }
+
+  const normalized = String(value).trim();
+  if (!normalized) {
+    return '-';
+  }
+
+  const asNumber = Number(normalized);
+  if (Number.isFinite(asNumber) && /^-?\d+(\.\d+)?$/.test(normalized)) {
+    return asNumber.toFixed(2);
+  }
+
+  return normalized;
+}
+
 export function formatObservedValue(value: unknown, categoryName?: string) {
   if (value === null || value === undefined || value === '') {
     return isNonDestructiveCategory(categoryName) ? 'Satisfactory' : '-';
@@ -17,7 +39,7 @@ export function formatObservedValue(value: unknown, categoryName?: string) {
     return 'Satisfactory';
   }
 
-  return String(value);
+  return formatCertificateValue(value);
 }
 
 export function getIsoDeclarationText() {

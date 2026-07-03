@@ -6,19 +6,17 @@ import {
   CERTIFICATE_COMPANY_NAME,
   CERTIFICATE_COMPANY_SUBTITLE,
   CERTIFICATE_COMPANY_TAGLINE,
-  CERTIFICATE_DEFAULT_NDT_ROWS,
-  CERTIFICATE_DEFAULT_REMARK,
   CERTIFICATE_SECTION_TITLES,
   CERTIFICATE_TITLE,
 } from '../certificate/certificate.constants';
 import { formatObservedValue, getIsoDeclarationText } from '../certificate/certificate.display';
+import { buildCertificateMatrixLayout } from '../certificate/certificate.matrix';
 import type {
-  CategoryShape,
   CertificateChemicalRow,
-  CertificateDimensionRow,
   CertificateItem,
   CertificateSections,
-  CertificateTableRow,
+  CertificateMatrixRow,
+  CertificateSizeReference,
 } from '../certificate/certificate.types';
 
 type ExcelQcData = {
@@ -33,8 +31,9 @@ type ExcelQcData = {
   customer: {
     name: string;
   };
-  item: Omit<CertificateItem, 'status' | 'categories' | 'certificateSections'>;
-  categories: CategoryShape[];
+  item: Omit<CertificateItem, 'status' | 'categories'> & {
+    categories?: CertificateItem['categories'];
+  };
   chemicalComposition?: unknown;
   certificateSections?: CertificateSections;
   certificate?: {
@@ -91,7 +90,7 @@ export class ExcelService {
   async generateQCReport(qcData: ExcelQcData): Promise<Buffer> {
     const workbook = this.createWorkbook();
     const sheet = workbook.addWorksheet('Test Certificate', {
-      pageSetup: { paperSize: 9, orientation: 'portrait', fitToPage: true, fitToWidth: 1 },
+      pageSetup: { paperSize: 9, orientation: 'landscape', fitToPage: true, fitToWidth: 1 },
       views: [{ showGridLines: false }],
     });
 
@@ -108,8 +107,8 @@ export class ExcelService {
       items: [
         {
           ...qcData.item,
+          categories: qcData.item.categories ?? [],
           status: qcData.status || 'PASS',
-          categories: qcData.categories,
           certificateSections: qcData.certificateSections,
         },
       ],
@@ -121,7 +120,7 @@ export class ExcelService {
   async generateCustomerQCReport(tcData: ExcelCustomerTcData): Promise<Buffer> {
     const workbook = this.createWorkbook();
     const sheet = workbook.addWorksheet('Test Certificate', {
-      pageSetup: { paperSize: 9, orientation: 'portrait', fitToPage: true, fitToWidth: 1 },
+      pageSetup: { paperSize: 9, orientation: 'landscape', fitToPage: true, fitToWidth: 1 },
       views: [{ showGridLines: false }],
     });
 
@@ -152,17 +151,24 @@ export class ExcelService {
   private configureSheet(sheet: Worksheet) {
     sheet.columns = [
       { width: 6 },
-      { width: 18 },
+      { width: 24 },
       { width: 14 },
       { width: 14 },
       { width: 16 },
+      { width: 14 },
+      { width: 12 },
       { width: 16 },
       { width: 14 },
+      { width: 12 },
+      { width: 16 },
       { width: 14 },
+      { width: 12 },
+      { width: 16 },
       { width: 14 },
+      { width: 12 },
+      { width: 16 },
       { width: 14 },
-      { width: 14 },
-      { width: 14 },
+      { width: 12 },
     ];
     sheet.pageSetup.margins = {
       left: 0.35,
@@ -190,29 +196,45 @@ export class ExcelService {
         logoUrl?: string | null;
         isoHallmarkUrl?: string | null;
       } | null;
-      items: Array<{
-        od: number;
-        wt: number;
-        qty?: number;
-        length?: number;
-        condition?: string;
-        status: string;
-        categories: CategoryShape[];
-        certificateSections?: CertificateSections;
-      }>;
+      items: CertificateItem[];
     },
   ) {
     let row = 1;
     row = this.renderHeader(sheet, row, data.tcConfig ?? null);
     row = this.renderInfoGrid(sheet, row, data);
     row = this.renderChemicalSection(sheet, row, data.chemicalRows);
-
-    data.items.forEach((item, index) => {
-      row = this.renderItemSummary(sheet, row, item, index + 1);
-      row = this.renderDimensionSection(sheet, row, item.certificateSections?.dimensionRows ?? []);
-      row = this.renderTestSection(sheet, row, CERTIFICATE_SECTION_TITLES.mechanical, item.certificateSections?.mechanicalRows ?? []);
-      row = this.renderTestSection(sheet, row, CERTIFICATE_SECTION_TITLES.metallurgical, item.certificateSections?.metallurgicalRows ?? [], true);
-      row = this.renderNdtSection(sheet, row, this.extractVisualRows(item.categories));
+    const layout = buildCertificateMatrixLayout(data.items, 5);
+    row = this.renderSizeReferenceSection(sheet, row, layout.sizeReferences);
+    layout.sizeChunks.forEach((chunk) => {
+      row = this.renderMatrixSection(
+        sheet,
+        row,
+        `${CERTIFICATE_SECTION_TITLES.dimension} (${chunk.label})`,
+        chunk.sizes,
+        chunk.sections.dimension.rows,
+      );
+      row = this.renderMatrixSection(
+        sheet,
+        row,
+        `${CERTIFICATE_SECTION_TITLES.mechanical} (${chunk.label})`,
+        chunk.sizes,
+        chunk.sections.mechanical.rows,
+      );
+      row = this.renderMatrixSection(
+        sheet,
+        row,
+        `${CERTIFICATE_SECTION_TITLES.metallurgical} (${chunk.label})`,
+        chunk.sizes,
+        chunk.sections.metallurgical.rows,
+        true,
+      );
+      row = this.renderMatrixSection(
+        sheet,
+        row,
+        `${CERTIFICATE_SECTION_TITLES.ndt} (${chunk.label})`,
+        chunk.sizes,
+        chunk.sections.ndt.rows,
+      );
     });
 
     row = this.renderRemarks(sheet, row, data.overallStatus, data.remarks);
@@ -288,7 +310,7 @@ export class ExcelService {
   ) {
     const rows = [
       ['TC NO', `QC-${data.batchNumber}`, 'DATE', new Date().toLocaleDateString(), 'BATCH NO.', data.batchNumber],
-      ['M/S.', data.customer || '-', 'P.O. / INV.', '-', '', ''],
+      ['M/S.', data.customer || '-', 'P.O. / INV.', '-', 'PRODUCT TYPE', data.tubeType || 'Smooth Copper Tube'],
       ['PRODUCT', data.tubeType || 'Smooth Copper Tube', '', '', '', ''],
       ['SPECIFICATION', 'IS 10773:2025', 'GRADE', data.grade || '-', '', ''],
     ];
@@ -325,99 +347,107 @@ export class ExcelService {
     return headerRow + safeRows.length + 2;
   }
 
-  private renderItemSummary(
+  private renderSizeReferenceSection(
     sheet: Worksheet,
     row: number,
-    item: { od: number; wt: number; qty?: number; length?: number; condition?: string; status: string },
-    index: number,
+    rows: CertificateSizeReference[],
   ) {
-    this.writeGridRow(
-      sheet,
-      row,
-      ['ITEM', String(index), 'SIZE', `${item.od} x ${item.wt} x ${item.length ?? '-'}`, '', ''],
-      [1, 2, 6, 8, 11, 12],
-      [1, 5, 7, 10, 11, 12],
-      18,
-    );
-    this.writeGridRow(
-      sheet,
-      row + 1,
-      ['CONDITION', item.condition ?? '-', 'QTY', item.qty != null ? String(item.qty) : '-', 'STATUS', item.status],
-      [1, 2, 6, 8, 11, 12],
-      [1, 5, 7, 10, 11, 12],
-      18,
-    );
-    this.colorResultCell(sheet.getCell(`L${row + 1}`), item.status);
-    return row + 3;
-  }
-
-  private renderDimensionSection(sheet: Worksheet, row: number, rows: CertificateDimensionRow[]) {
-    row = this.renderSectionHeader(sheet, row, CERTIFICATE_SECTION_TITLES.dimension);
+    row = this.renderSectionHeader(sheet, row, 'SIZE REFERENCE');
     const headerRow = row;
-    this.writeTableRow(sheet, headerRow, ['SR', 'TEST', 'MIN', 'MAX', 'OBSERVED', 'RESULT'], ['A', 'B', 'E', 'G', 'I', 'K'], [1, 4, 6, 8, 10, 12], true);
-    const safeRows = rows.length ? rows : [{ sr: 1, test: 'Outside Diameter', min: '-', max: '-', observed: '-', result: '-', required: '-', size: '-', condition: '-' }];
+    const normalizedRows = rows.length
+      ? rows
+      : [{ key: 'S1', sr: 'S1', size: '-', condition: '-', qty: '-', pcs: '-' }];
+    const pairCount = Math.ceil(normalizedRows.length / 2);
+    const starts = ['A', 'B', 'F', 'I', 'J', 'K', 'L', 'P', 'Q', 'R'];
+    const ends = [1, 5, 8, 9, 10, 11, 15, 16, 17, 18];
+    this.writeTableRow(
+      sheet,
+      headerRow,
+      ['SR', 'SIZE', 'COND', 'QTY', 'PCS', 'SR', 'SIZE', 'COND', 'QTY', 'PCS'],
+      starts,
+      ends,
+      true,
+    );
 
-    safeRows.forEach((entry, index) => {
+    for (let index = 0; index < pairCount; index += 1) {
       const currentRow = headerRow + 1 + index;
+      const left = normalizedRows[index * 2];
+      const right = normalizedRows[index * 2 + 1];
       this.writeTableRow(
         sheet,
         currentRow,
-        [String(entry.sr), entry.test, entry.min, entry.max, formatObservedValue(entry.observed, CERTIFICATE_SECTION_TITLES.dimension), entry.result],
-        ['A', 'B', 'E', 'G', 'I', 'K'],
-        [1, 4, 6, 8, 10, 12],
+        [
+          left?.sr ?? '-',
+          left?.size ?? '-',
+          left?.condition ?? '-',
+          left?.qty ?? '-',
+          left?.pcs ?? '-',
+          right?.sr ?? '-',
+          right?.size ?? '-',
+          right?.condition ?? '-',
+          right?.qty ?? '-',
+          right?.pcs ?? '-',
+        ],
+        starts,
+        ends,
       );
-      this.colorResultCell(sheet.getCell(`K${currentRow}`), entry.result);
-    });
+    }
 
-    return headerRow + safeRows.length + 2;
+    return headerRow + pairCount + 2;
   }
 
-  private renderTestSection(
+  private renderMatrixSection(
     sheet: Worksheet,
     row: number,
     title: string,
-    rows: CertificateTableRow[],
+    sizes: CertificateSizeReference[],
+    rows: CertificateMatrixRow[],
     tall = false,
   ) {
     row = this.renderSectionHeader(sheet, row, title);
     const headerRow = row;
-    this.writeTableRow(sheet, headerRow, ['SR', 'TEST', 'REQUIRED', 'OBSERVED', 'RESULT'], ['A', 'B', 'F', 'I', 'K'], [1, 5, 8, 10, 12], true);
-    const safeRows = rows.length ? rows : [{ sr: 1, test: '-', required: '-', observed: '-', result: '-' }];
+    const headers = ['SR', 'TEST', ...sizes.flatMap((size) => [`${size.sr} REQ`, `${size.sr} OBS`, `${size.sr} RES`])];
+    const starts = ['A', 'B', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K', 'L', 'M', 'N', 'O', 'P', 'Q', 'R'];
+    const ends = [1, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18];
+    this.writeTableRow(sheet, headerRow, headers, starts.slice(0, headers.length), ends.slice(0, headers.length), true);
+    const safeRows = rows.length
+      ? rows
+      : [
+          {
+            sr: 1,
+            test: '-',
+            cells: sizes.map(() => ({ required: '-', observed: '-', result: '-' })),
+          },
+        ];
 
     safeRows.forEach((entry, index) => {
       const currentRow = headerRow + 1 + index;
+      const values = [
+        String(entry.sr),
+        entry.test,
+        ...entry.cells.flatMap((cell) => [
+          cell.required,
+          formatObservedValue(cell.observed, title),
+          cell.result,
+        ]),
+      ];
       this.writeTableRow(
         sheet,
         currentRow,
-        [String(entry.sr), entry.test, entry.required, formatObservedValue(entry.observed, title), entry.result],
-        ['A', 'B', 'F', 'I', 'K'],
-        [1, 5, 8, 10, 12],
+        values,
+        starts.slice(0, values.length),
+        ends.slice(0, values.length),
       );
-      sheet.getRow(currentRow).height = tall ? 24 : 18;
-      sheet.getCell(`B${currentRow}`).alignment = { vertical: 'middle', horizontal: 'left', wrapText: tall };
-      sheet.getCell(`F${currentRow}`).alignment = { vertical: 'middle', horizontal: 'left', wrapText: tall };
-      this.colorResultCell(sheet.getCell(`K${currentRow}`), entry.result);
-    });
-
-    return headerRow + safeRows.length + 2;
-  }
-
-  private renderNdtSection(sheet: Worksheet, row: number, rows: Array<{ test: string; required: string; observed: string }>) {
-    row = this.renderSectionHeader(sheet, row, CERTIFICATE_SECTION_TITLES.ndt);
-    const headerRow = row;
-    this.writeTableRow(sheet, headerRow, ['SR', 'TEST', 'REQUIRED', 'OBSERVED'], ['A', 'B', 'G', 'J'], [1, 6, 9, 12], true);
-    const safeRows = rows.length ? rows : [{ test: '-', required: '-', observed: '-' }];
-
-    safeRows.forEach((entry, index) => {
-      const currentRow = headerRow + 1 + index;
-      this.writeTableRow(
-        sheet,
-        currentRow,
-        [String(index + 1), entry.test, entry.required, formatObservedValue(entry.observed, CERTIFICATE_SECTION_TITLES.ndt)],
-        ['A', 'B', 'G', 'J'],
-        [1, 6, 9, 12],
-      );
-      sheet.getRow(currentRow).height = 18;
+      sheet.getRow(currentRow).height = tall ? 30 : 18;
+      sheet.getCell(`B${currentRow}`).alignment = {
+        vertical: 'middle',
+        horizontal: 'left',
+        wrapText: tall,
+      };
+      entry.cells.forEach((_cell, cellIndex) => {
+        const resultColNumber = 6 + cellIndex * 3;
+        this.colorResultCell(sheet.getCell(currentRow, resultColNumber), entry.cells[cellIndex].result);
+      });
     });
 
     return headerRow + safeRows.length + 2;
@@ -425,13 +455,13 @@ export class ExcelService {
 
   private renderRemarks(sheet: Worksheet, row: number, status: string, remarks: string) {
     row = this.renderSectionHeader(sheet, row, CERTIFICATE_SECTION_TITLES.remarks);
-    this.mergeAndBorder(sheet, `A${row}:K${row}`);
-    this.mergeAndBorder(sheet, `L${row}:L${row}`);
+    this.mergeAndBorder(sheet, `A${row}:Q${row}`);
+    this.mergeAndBorder(sheet, `R${row}:R${row}`);
     this.setValue(sheet, `A${row}`, `FINAL RESULT: ${status}`, { bold: true, fill: this.headerFill });
     // this.setValue(sheet, `L${row}`, status, { bold: true, align: 'center', fill: this.headerFill });
     // this.colorResultCell(sheet.getCell(`L${row}`), status);
 
-    this.mergeAndBorder(sheet, `A${row + 1}:L${row + 2}`);
+    this.mergeAndBorder(sheet, `A${row + 1}:R${row + 2}`);
     this.setValue(
       sheet,
       `A${row + 1}`,
@@ -445,16 +475,16 @@ export class ExcelService {
   }
 
   private renderSignatureSection(sheet: Worksheet, row: number) {
-    this.mergeAndBorder(sheet, `A${row}:D${row + 2}`);
-    this.mergeAndBorder(sheet, `E${row}:H${row + 2}`);
-    this.mergeAndBorder(sheet, `I${row}:L${row + 2}`);
+    this.mergeAndBorder(sheet, `A${row}:F${row + 2}`);
+    this.mergeAndBorder(sheet, `G${row}:L${row + 2}`);
+    this.mergeAndBorder(sheet, `M${row}:R${row + 2}`);
     this.setValue(sheet, `A${row + 3}`, 'Tested By', { align: 'center' });
-    this.setValue(sheet, `E${row + 3}`, 'Authorized Signatory', { align: 'center' });
-    this.setValue(sheet, `I${row + 3}`, 'Company Stamp', { align: 'center' });
+    this.setValue(sheet, `G${row + 3}`, 'Authorized Signatory', { align: 'center' });
+    this.setValue(sheet, `M${row + 3}`, 'Company Stamp', { align: 'center' });
   }
 
   private renderSectionHeader(sheet: Worksheet, row: number, title: string) {
-    this.mergeAndBorder(sheet, `A${row}:L${row}`);
+    this.mergeAndBorder(sheet, `A${row}:R${row}`);
     this.setValue(sheet, `A${row}`, title, {
       bold: true,
       size: 10,
@@ -568,23 +598,6 @@ export class ExcelService {
     return String.fromCharCode(64 + index);
   }
 
-  private extractVisualRows(categories: CategoryShape[]) {
-    const rows = categories.flatMap((category) =>
-      category.rules.map((rule) => this.expandRuleRows(rule)),
-    ).flat();
-    const filtered = rows.filter((row) =>
-      /visual|surface|dent|scratch|clean|eddy|hydro|leak|pneumatic|defect/i.test(row.name),
-    );
-    if (!filtered.length) {
-      return [...CERTIFICATE_DEFAULT_NDT_ROWS];
-    }
-    return filtered.map((row) => ({
-      test: row.name,
-      required: row.spec || 'As per standard',
-      observed: formatObservedValue(row.observed, CERTIFICATE_SECTION_TITLES.ndt),
-    }));
-  }
-
   private addWorkbookImage(
     workbook: Workbook,
     value: string | null | undefined,
@@ -618,95 +631,4 @@ export class ExcelService {
     return /\.jpe?g$/i.test(filePath) ? 'jpeg' : 'png';
   }
 
-  private expandRuleRows(rule: any) {
-    const ruleType = rule.ruleDefinition?.ruleType ?? '';
-    const config = (rule.ruleDefinition?.ruleConfig ?? {}) as Record<string, any>;
-    const results = Array.isArray(rule.results) ? rule.results : [];
-    const resultByFieldKey = new Map(
-      results.map((result: any) => [String(result.fieldKey ?? ''), result]),
-    );
-
-    if (ruleType === 'MECHANICAL_PROPERTIES') {
-      const keys = [
-        { key: 'tensile', label: 'Tensile' },
-        { key: 'elongation', label: 'Elongation' },
-        ...(config.flatteningRequired ? [{ key: 'flattening', label: 'Flattening' }] : []),
-        ...(config.driftRequired ? [{ key: 'drift', label: 'Drift Expanding' }] : []),
-      ];
-
-      return keys.map((entry) => {
-        const result = resultByFieldKey.get(entry.key) ?? results.find((candidate: any) => candidate.fieldKey === entry.key);
-        return {
-          name: entry.label,
-          observed:
-            entry.key === 'flattening' || entry.key === 'drift'
-              ? Number(result?.observed) === 1
-                ? 'Yes'
-                : 'No'
-              : this.formatValue(result?.observed),
-          spec: this.getSpecText(rule, result, entry.label),
-          status: result?.status ?? 'PENDING',
-        };
-      });
-    }
-
-    if (ruleType === 'GENERIC_CONDITION') {
-      return (config.fields ?? []).map((field: any, index: number) => {
-        const result = resultByFieldKey.get(String(field.name ?? '')) ?? results[index] ?? null;
-        return {
-          name: field.label || field.name,
-          observed: this.formatValue(result?.observed),
-          spec: this.getSpecText(rule, result, field.name),
-          status: result?.status ?? 'PENDING',
-        };
-      });
-    }
-
-    if (ruleType === 'TEXT_BOOLEAN') {
-      return [
-        {
-          name: String(rule.contextLabel ?? rule.name),
-          observed: Number(results[0]?.observed) === 1 ? 'Yes' : 'No',
-          spec: this.getSpecText(rule, results[0]),
-          status: results[0]?.status ?? 'PENDING',
-        },
-      ];
-    }
-
-    return [
-      {
-        name: String(rule.contextLabel ?? rule.name),
-        observed: this.formatValue(results[0]?.observed),
-        spec: this.getSpecText(rule, results[0]),
-        status: results[0]?.status ?? 'PENDING',
-      },
-    ];
-  }
-
-  private getSpecText(
-    rule: Record<string, any>,
-    result?: { min: number | null; max: number | null },
-    fieldName?: string,
-  ) {
-    const min = result?.min ?? rule.spec?.min ?? rule.min ?? null;
-    const max = result?.max ?? rule.spec?.max ?? rule.max ?? null;
-    const expectedValue = rule.spec?.expectedValue ?? rule.expectedValue ?? null;
-
-    if (fieldName) {
-      const parts = [min != null ? `Min: ${min}` : null, max != null ? `Max: ${max}` : null].filter(Boolean);
-      return parts.join(' | ') || 'Configured';
-    }
-    if (min != null && max != null) return `Min: ${min} | Max: ${max}`;
-    if (min != null) return `Min: ${min}`;
-    if (max != null) return `Max: ${max}`;
-    if (expectedValue != null && expectedValue !== '') return `Expected: ${expectedValue}`;
-    return 'Configured';
-  }
-
-  private formatValue(value: unknown) {
-    if (value === null || value === undefined || value === '') {
-      return '-';
-    }
-    return String(value);
-  }
 }

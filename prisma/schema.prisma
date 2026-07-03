@@ -173,6 +173,7 @@ model BatchItem {
   od        Float
   wt        Float
   qty       Float
+  pcs       Float  @default(0)
   condition String
   length    Float
   qcTests   QCTest[]

@@ -26,6 +26,7 @@ export type CertificateSections = {
   dimensionRows: CertificateDimensionRow[];
   mechanicalRows: CertificateTableRow[];
   metallurgicalRows: CertificateTableRow[];
+  ndtRows: CertificateTableRow[];
   remarks: string;
 };
 
@@ -38,6 +39,7 @@ export type CertificateItem = {
   od: number;
   wt: number;
   qty?: number;
+  pcs?: number;
   length?: number;
   condition?: string;
   status: string;
@@ -59,4 +61,45 @@ export type CertificatePayload = {
     chemicalRows: CertificateChemicalRow[];
     remarks: string;
   };
+};
+
+export type CertificateSizeReference = {
+  key: string;
+  sr: string;
+  size: string;
+  condition: string;
+  qty: string;
+  pcs: string;
+};
+
+export type CertificateMatrixCell = {
+  required: string;
+  observed: string;
+  result: string;
+};
+
+export type CertificateMatrixRow = {
+  sr: number;
+  test: string;
+  cells: CertificateMatrixCell[];
+};
+
+export type CertificateMatrixSection = {
+  rows: CertificateMatrixRow[];
+};
+
+export type CertificateSizeChunk = {
+  label: string;
+  sizes: CertificateSizeReference[];
+  sections: {
+    dimension: CertificateMatrixSection;
+    mechanical: CertificateMatrixSection;
+    metallurgical: CertificateMatrixSection;
+    ndt: CertificateMatrixSection;
+  };
+};
+
+export type CertificateMatrixLayout = {
+  sizeReferences: CertificateSizeReference[];
+  sizeChunks: CertificateSizeChunk[];
 };

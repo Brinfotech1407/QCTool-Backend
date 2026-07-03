@@ -114,6 +114,7 @@ export class BatchService {
                     od: item.od,
                     wt: item.wt,
                     qty: item.qty,
+                    pcs: item.pcs,
                     condition: item.condition,
                     length: item.length,
                   })),

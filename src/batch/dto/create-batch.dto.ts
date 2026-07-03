@@ -25,6 +25,11 @@ export class CreateBatchItemDto {
   @Min(0.000001)
   qty: number;
 
+  @Type(() => Number)
+  @IsNumber()
+  @Min(0.000001)
+  pcs: number;
+
   @IsString()
   @IsNotEmpty()
   condition: string;
