@@ -4,9 +4,18 @@ import { AppModule } from './app.module';
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
-  
+
+  // app.enableCors({
+  //   origin: 'http://localhost:5173', // frontend URL
+  //   methods: 'GET,HEAD,PUT,PATCH,POST,DELETE',
+  //   credentials: true,
+  // });
+
   app.enableCors({
-    origin: 'http://localhost:5173', // frontend URL
+    origin: [
+      'http://localhost:5173',
+      process.env.FRONTEND_URL,
+    ],
     methods: 'GET,HEAD,PUT,PATCH,POST,DELETE',
     credentials: true,
   });
@@ -19,8 +28,8 @@ async function bootstrap() {
     }),
   );
 
-  await app.listen(3000);
+  await app.listen(process.env.PORT ?? 3000);
 
-  
+
 }
 bootstrap();
