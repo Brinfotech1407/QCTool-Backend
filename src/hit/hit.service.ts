@@ -46,6 +46,7 @@ export class HitService {
             od: dto.od,
             thickness: dto.thickness,
             length: dto.length,
+            lengthUnit: dto.lengthUnit ?? 'meter',
             condition: dto.condition,
             weight: dto.weight,
             availableWeight: dto.weight,
@@ -178,6 +179,7 @@ export class HitService {
       od?: number;
       thickness?: number;
       length?: number;
+      lengthUnit?: 'meter' | 'feet';
       condition?: string;
       weight?: number;
       availableWeight?: number;
@@ -191,6 +193,7 @@ export class HitService {
       od: dto.od,
       thickness: dto.thickness,
       length: dto.length,
+      lengthUnit: dto.lengthUnit,
       condition: dto.condition,
     };
 

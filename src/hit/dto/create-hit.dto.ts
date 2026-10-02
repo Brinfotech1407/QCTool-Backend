@@ -1,6 +1,7 @@
 import { Type } from 'class-transformer';
 import {
   IsDate,
+  IsIn,
   IsNotEmpty,
   IsNumber,
   IsObject,
@@ -29,6 +30,10 @@ export class CreateHitDto {
   @Type(() => Number)
   @IsNumber()
   length: number;
+
+  @IsOptional()
+  @IsIn(['meter', 'feet'])
+  lengthUnit?: 'meter' | 'feet';
 
   @IsString()
   @IsNotEmpty()

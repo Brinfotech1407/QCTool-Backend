@@ -88,6 +88,7 @@ model HitEntry {
   od              Float  @default(0)
   thickness       Float  @default(0)
   length          Float  @default(0)
+  lengthUnit      String?
   condition       String @default("NA")
   weight          Float  @default(0)
   availableWeight Float  @default(0)

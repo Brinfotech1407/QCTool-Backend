@@ -63,6 +63,10 @@ export class UpdateHitDto {
   length?: number;
 
   @IsOptional()
+  @IsIn(['meter', 'feet'])
+  lengthUnit?: 'meter' | 'feet';
+
+  @IsOptional()
   @IsString()
   @IsNotEmpty()
   condition?: string;
