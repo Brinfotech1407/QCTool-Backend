@@ -1,6 +1,7 @@
 import {
   ArrayMinSize,
   IsArray,
+  IsBoolean,
   IsDefined,
   IsObject,
   IsOptional,
@@ -17,6 +18,10 @@ export class CreateQCTestEntryDto {
   @IsOptional()
   @IsDefined()
   observed?: string | number | boolean;
+
+  @IsOptional()
+  @IsBoolean()
+  notApplicable?: boolean;
 
   @IsOptional()
   @IsObject()

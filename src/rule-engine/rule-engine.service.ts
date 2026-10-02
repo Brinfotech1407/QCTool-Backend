@@ -35,7 +35,7 @@ export class RuleEngineService {
         case RuleType.GENERIC_CONDITION:
           return this.evaluateGeneric(parameter.ruleDefinition.ruleConfig, batchContext);
         case RuleType.TEXT_BOOLEAN:
-          return this.evaluateTextBoolean(ruleConfig, batchContext);
+          return this.evaluateTextBoolean(ruleConfig, batchContext, parameter.name);
         case RuleType.TEXT_NUMERIC:
           return this.evaluateTextNumeric(ruleConfig, batchContext);
         default:
@@ -324,7 +324,7 @@ export class RuleEngineService {
     }
 
     // Elongation
-    if (rule.elongationMin !== null) {
+    if (String(condition ?? '').trim().toLowerCase().replace(/[^a-z]/g, '') !== 'harddrawn' && rule.elongationMin != null) {
       const result = elongation >= rule.elongationMin;
       details.elongation = result;
       if (!result) pass = false;
@@ -420,13 +420,17 @@ export class RuleEngineService {
     return { pass, details };
   }
 
-  private evaluateTextBoolean(config: any, batchContext: any) {
+  private evaluateTextBoolean(config: any, batchContext: any, parameterName?: string) {
 
     const { booleanResult, grade } = batchContext;
 
-    // Grade restriction
-    if (config.applicableGrades?.length > 0) {
-      if (!config.applicableGrades.includes(grade)) {
+    const normalizeGrade = (value: unknown) => String(value ?? '').trim().toLowerCase().replace(/[^a-z0-9]/g, '');
+    const hydrogen = /hydrogen|gassing|open\s+grain/i.test(`${parameterName ?? ''} ${config.statement ?? ''}`);
+    const applicable = hydrogen
+      ? ['of', 'cuof', 'ofc', 'cuofc'].includes(normalizeGrade(grade))
+      : !config.applicableGrades?.length || config.applicableGrades.some((entry: unknown) => normalizeGrade(entry) === normalizeGrade(grade));
+    if (!applicable) {
+      {
         return {
           pass: true,
           skipped: true,

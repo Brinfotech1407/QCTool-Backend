@@ -66,6 +66,8 @@ type CustomerTcData = {
 
 type BatchWithNestedItems = {
   id: string;
+  grade?: string;
+  gradeId?: string;
   companyId: string;
   batchHits: Array<{
     hit: {
@@ -172,7 +174,7 @@ export class QcTestsService {
 
     const applicableRules = (await this.getApplicableRulesForItem(
       dto.batchId,
-      item,
+      { ...item, grade: batch.grade || batch.gradeId },
     )) as any[];
     const applicableRulesById = new Map(
       applicableRules.map((rule) => [rule.id, rule]),
@@ -279,6 +281,20 @@ export class QcTestsService {
 
       const ruleType = rule.parameter?.ruleDefinition?.ruleType as RuleType | undefined;
 
+      if (entry.notApplicable === true) {
+        const statement = rule.parameter?.ruleDefinition?.ruleConfig?.statement ?? '';
+        if (ruleType !== RuleType.TEXT_NUMERIC || !/residue|resuide|evaporation/i.test(`${rule.name} ${statement}`)) {
+          throw new BadRequestException('Only the residue test can be marked not required');
+        }
+        return this.makeStoredResult(entry.ruleId, {
+          fieldKey: undefined,
+          observed: 0,
+          min: null,
+          max: null,
+          status: 'N/A',
+        });
+      }
+
       if (ruleType === RuleType.GENERIC_CONDITION) {
         return this.buildGenericConditionResults(batch, item, rule, entry);
       }
@@ -362,7 +378,8 @@ export class QcTestsService {
     const fieldObservations = entry.fieldObservations ?? {};
     const config = rule.parameter?.ruleDefinition?.ruleConfig ?? {};
 
-    const requiredKeys = ['tensile', 'elongation'];
+    const hardDrawn = String(item.condition ?? '').trim().toLowerCase().replace(/[^a-z]/g, '') === 'harddrawn';
+    const requiredKeys = ['tensile', ...(hardDrawn ? [] : ['elongation'])];
     if (config.flatteningRequired) {
       requiredKeys.push('flattening');
     }
@@ -395,7 +412,11 @@ export class QcTestsService {
         String(item.condition ?? '').trim().toLowerCase(),
     );
 
-    return requiredKeys.map((key) => {
+    const resultKeys = ['tensile', 'elongation', ...requiredKeys.filter((key) => !['tensile', 'elongation'].includes(key))];
+    return resultKeys.map((key) => {
+      if (key === 'elongation' && hardDrawn) {
+        return this.makeStoredResult(rule.id, { fieldKey: key, observed: 0, min: null, max: null, status: 'N/A' });
+      }
       const detailPass = Boolean(evaluation?.details?.[key]);
       const observedValue = fieldObservations[key];
 
@@ -526,7 +547,7 @@ export class QcTestsService {
       ...customer,
       items: customer.items.map((item) => {
         const latestQc = item.qcTests[0] ?? null;
-        const categories = this.buildCategoriesForItem(batchTests, item);
+        const categories = this.buildCategoriesForItem(batchTests, { ...item, grade: batch.grade || batch.gradeId });
         const itemStatus =
           latestQc && latestQc.tests.some((test) => test.status === 'FAIL')
             ? 'FAIL'
@@ -651,7 +672,7 @@ export class QcTestsService {
       },
     });
 
-    const categories = this.buildCategoriesForItem(batchTests, qcTest.item).map(
+    const categories = this.buildCategoriesForItem(batchTests, { ...qcTest.item, grade: qcTest.batch.grade || qcTest.batch.gradeId }).map(
       (category) => ({
         ...category,
         rules: category.rules.map((rule) => ({
@@ -831,7 +852,7 @@ export class QcTestsService {
           return null;
         }
 
-        const categories = this.buildCategoriesForItem(batchTests, item).map((category) => ({
+        const categories = this.buildCategoriesForItem(batchTests, { ...item, grade: batch.grade || batch.gradeId }).map((category) => ({
           ...category,
           rules: category.rules.map((rule) => ({
             ...rule,
@@ -1247,6 +1268,17 @@ export class QcTestsService {
       results.map((result: any) => [String(result.fieldKey ?? ''), result]),
     );
 
+    if (results[0]?.status === 'N/A') {
+      return [{
+        categoryName,
+        ruleType,
+        test: String(rule.contextLabel ?? rule.name),
+        required: 'N/A',
+        observed: 'N/A',
+        result: 'N/A',
+      }];
+    }
+
     if (ruleType === RuleType.MECHANICAL_PROPERTIES) {
       const keys = [
         { key: 'tensile', label: 'Tensile' },
@@ -1265,9 +1297,9 @@ export class QcTestsService {
           categoryName,
           ruleType,
           test: entry.label,
-          required: this.getCertificateSpecText(rule, result, entry.label),
+          required: result?.status === 'N/A' ? 'N/A' : this.getCertificateSpecText(rule, result, entry.label),
           observed:
-            entry.key === 'flattening' || entry.key === 'drift'
+            result?.status === 'N/A' ? 'N/A' : entry.key === 'flattening' || entry.key === 'drift'
               ? Number(result?.observed) === 1
               ? 'Yes'
               : 'No'
@@ -1497,7 +1529,7 @@ export class QcTestsService {
       .toLowerCase()
       .replace(/[^a-z0-9]/g, '');
 
-    return normalized === 'cuofc';
+    return ['of', 'cuof', 'ofc', 'cuofc'].includes(normalized);
   }
 
   private getCertificateHardnessValue(item: {
@@ -1580,6 +1612,7 @@ export class QcTestsService {
       wt: number;
       length: number;
       condition: string;
+      grade?: string;
     },
   ) {
     const batchTests = await this.prisma.batchTest.findMany({
@@ -1620,7 +1653,7 @@ export class QcTestsService {
     return [...categoryMap.values()].sort((left, right) => left.sequence - right.sequence);
   }
 
-  private buildCategoriesForItem(batchTests: Array<any>, item: { od: number; wt: number; length: number; condition: string }) {
+  private buildCategoriesForItem(batchTests: Array<any>, item: { od: number; wt: number; length: number; condition: string; grade?: string }) {
     const applicableRules = this.buildApplicableRules(batchTests, item);
     const categoryMap = new Map<
       string,
@@ -1650,7 +1683,7 @@ export class QcTestsService {
       .sort((left, right) => left.sequence - right.sequence);
   }
 
-  private buildApplicableRules(batchTests: Array<any>, item: { od: number; wt: number; length: number; condition: string }) {
+  private buildApplicableRules(batchTests: Array<any>, item: { od: number; wt: number; length: number; condition: string; grade?: string }) {
     return batchTests.flatMap((batchTest) =>
       (batchTest.test?.parameters ?? [])
         .map((parameter: any, parameterIndex: number) =>
@@ -1681,7 +1714,7 @@ export class QcTestsService {
     parameter: any,
     categorySequence: number,
     categoryName: string,
-    item: { od: number; wt: number; length: number; condition: string },
+    item: { od: number; wt: number; length: number; condition: string; grade?: string },
     ruleSequence: number,
   ) {
     if (!this.isApplicableToItem(parameter, item)) {
@@ -1701,6 +1734,9 @@ export class QcTestsService {
       type,
       validationType,
       ruleType: ruleType ?? 'DEFAULT',
+      elongationRequired: ruleType === RuleType.MECHANICAL_PROPERTIES
+        ? String(item.condition ?? '').trim().toLowerCase().replace(/[^a-z]/g, '') !== 'harddrawn'
+        : undefined,
       min: spec.min,
       max: spec.max,
       expectedValue: spec.expectedValue,
@@ -1713,8 +1749,12 @@ export class QcTestsService {
     };
   }
 
-  private isApplicableToItem(parameter: any, item: { condition: string }) {
+  private isApplicableToItem(parameter: any, item: { condition: string; grade?: string }) {
     const ruleDefinition = parameter.ruleDefinition;
+    const statement = ruleDefinition?.ruleConfig?.statement ?? '';
+    if (/hydrogen|gassing|open\s+grain/i.test(`${parameter.name} ${statement}`)) {
+      return this.isCuOfcGrade(item.grade);
+    }
     if (!ruleDefinition?.ruleConfig) {
       return true;
     }
@@ -1732,7 +1772,7 @@ export class QcTestsService {
     return true;
   }
 
-  private resolveSpec(parameter: any, item: { od: number; wt: number; length: number; condition: string }) {
+  private resolveSpec(parameter: any, item: { od: number; wt: number; length: number; condition: string; grade?: string }) {
     const ruleDefinition = parameter.ruleDefinition;
     const defaultCriteria = parameter.defaultCriteria;
 
@@ -1819,7 +1859,7 @@ export class QcTestsService {
 
   private buildEvaluationContext(
     batch: any,
-    item: { od: number; wt: number; length: number; condition: string },
+    item: { od: number; wt: number; length: number; condition: string; grade?: string },
     parameter: any,
     observedValue: string | number | boolean,
   ) {
